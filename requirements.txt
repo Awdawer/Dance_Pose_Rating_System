@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn==0.30.1
+mediapipe==0.10.11
+opencv-python==4.9.0.80
+numpy==1.26.4
+Pillow==10.2.0
+PyQt5==5.15.11
+reportlab==4.2.5

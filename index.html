@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dance Pose Scoring</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.5/drawing_utils.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>Dance Pose Scoring</h1>
+      <div class="score-panel">
+        <div class="score-number">
+          <span id="scoreValue">--</span><span class="score-unit">%</span>
+        </div>
+        <canvas id="radarChart"></canvas>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="video-section">
+        <div class="video-block">
+          <h2>User</h2>
+          <div class="stage">
+            <video id="userVideo" playsinline></video>
+            <canvas id="userCanvas"></canvas>
+          </div>
+          <div class="controls">
+            <label class="file-btn">
+              <input type="file" id="userFile" accept="video/*" />
+              <span>Upload User Video</span>
+            </label>
+            <button id="startCam">Start Webcam</button>
+            <button id="stopCam" disabled>Stop Webcam</button>
+          </div>
+        </div>
+
+        <div class="video-block">
+          <h2>Reference</h2>
+          <div class="stage">
+            <video id="refVideo" playsinline loop></video>
+            <canvas id="refCanvas"></canvas>
+          </div>
+          <div class="controls">
+            <label class="file-btn">
+              <input type="file" id="refFile" accept="video/*" />
+              <span>Upload Reference Video</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="timeline-controls">
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="stepBtn">Step Frame</button>
+        <button id="extractBad">Extract Bad Frames</button>
+        <button id="downloadReport">Download PDF Report</button>
+      </section>
+
+      <section class="badframes-section">
+        <h2>Bad Frames</h2>
+        <div id="badFramesGrid" class="badframes-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="scoring.js"></script>
+  <script src="app_py.js"></script>
+</body>
+<style>
+</style>
+</html>
+
