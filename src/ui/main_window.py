@@ -13,7 +13,61 @@ class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Dance Pose Scoring (Python GUI)")
-        self.resize(1200, 700)
+        self.resize(1400, 900)
+        
+        # Apply Dark Theme
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #1E1E1E;
+                color: #E0E0E0;
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+                font-size: 16px; /* Base font size increased */
+            }
+            QPushButton {
+                background-color: #333333;
+                border: 1px solid #555555;
+                border-radius: 8px; /* Slightly rounder */
+                padding: 12px 24px; /* Much larger padding */
+                color: #FFFFFF;
+                font-weight: bold;
+                font-size: 16px;
+                min-height: 40px; /* Ensure button height */
+            }
+            QPushButton:hover {
+                background-color: #444444;
+                border-color: #00C6FF;
+            }
+            QPushButton:pressed {
+                background-color: #222222;
+            }
+            QComboBox {
+                background-color: #333333;
+                border: 1px solid #555555;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 16px;
+                min-height: 40px;
+            }
+            QLabel {
+                color: #E0E0E0;
+                font-size: 16px;
+            }
+            QListWidget {
+                background-color: #252525;
+                border: 1px solid #333;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            QListWidget::item {
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QListWidget::item:selected {
+                background-color: #3A3A3A;
+                border: 1px solid #00C6FF;
+            }
+        """)
 
         model_path = ensure_model()
         if not model_path or not os.path.exists(model_path):
@@ -37,12 +91,12 @@ class MainWindow(QtWidgets.QWidget):
         self.refPanel = VideoPanel()
         self.scoreLabel = QtWidgets.QLabel("-- %")
         f = self.scoreLabel.font()
-        f.setPointSize(28)
+        f.setPointSize(48) # Much larger score
         f.setBold(True)
         self.scoreLabel.setFont(f)
         self.hintLabel = QtWidgets.QLabel("")
         f2 = self.hintLabel.font()
-        f2.setPointSize(24)
+        f2.setPointSize(36) # Larger timing hint
         f2.setBold(True)
         self.hintLabel.setFont(f2)
         self.hintLabel.setStyleSheet("color: #FBBF24;")
@@ -61,28 +115,6 @@ class MainWindow(QtWidgets.QWidget):
         self.lastUserLandmarks = []
         self.lastRefLandmarks = []
         self.lastDiffs = None
-        
-        self._countdown_val = 0
-        self.countdown_timer = QtCore.QTimer(self)
-        self.countdown_timer.setInterval(1000)
-        self.countdown_timer.timeout.connect(self.on_countdown_tick)
-
-        self.btnLoadUser = QtWidgets.QPushButton("加载用户视频")
-        self.btnLoadRef = QtWidgets.QPushButton("加载参考视频")
-        self.btnStartCam = QtWidgets.QPushButton("开启摄像头")
-        self.btnStopCam = QtWidgets.QPushButton("关闭摄像头")
-        self.camCombo = QtWidgets.QComboBox()
-        self.btnRefreshCams = QtWidgets.QPushButton("刷新摄像头")
-        self.btnPlay = QtWidgets.QPushButton("播放")
-        self.btnPause = QtWidgets.QPushButton("暂停")
-        self.btnStep = QtWidgets.QPushButton("逐帧")
-        self.btnExtract = QtWidgets.QPushButton("提取坏帧")
-        self.btnExport = QtWidgets.QPushButton("导出PDF报告")
-
-        self.lastUserLandmarks = []
-        self.lastRefLandmarks = []
-        self.lastDiffs = None
-        self.lastPercent = 0.0
 
         topLayout = QtWidgets.QHBoxLayout()
         topLayout.addWidget(QtWidgets.QLabel("分数："))
@@ -92,39 +124,122 @@ class MainWindow(QtWidgets.QWidget):
         topLayout.addStretch(1)
 
         stageLayout = QtWidgets.QHBoxLayout()
+        stageLayout.setSpacing(20)
         stageLayout.addWidget(self.userPanel, 1)
         stageLayout.addWidget(self.refPanel, 1)
+        
+        self._countdown_val = 0
+        self.countdown_timer = QtCore.QTimer(self)
+        self.countdown_timer.setInterval(1000)
+        self.countdown_timer.timeout.connect(self.on_countdown_tick)
 
-        ctrlLayout = QtWidgets.QGridLayout()
-        ctrlLayout.addWidget(self.btnLoadUser, 0, 0)
-        ctrlLayout.addWidget(self.btnLoadRef, 0, 1)
-        ctrlLayout.addWidget(self.btnStartCam, 0, 2)
-        ctrlLayout.addWidget(self.btnStopCam, 0, 3)
-        ctrlLayout.addWidget(self.camCombo, 0, 4)
-        ctrlLayout.addWidget(self.btnRefreshCams, 0, 5)
-        ctrlLayout.addWidget(self.btnPlay, 1, 0)
-        ctrlLayout.addWidget(self.btnPause, 1, 1)
-        ctrlLayout.addWidget(self.btnStep, 1, 2)
-        ctrlLayout.addWidget(self.btnExtract, 1, 3)
-        ctrlLayout.addWidget(self.btnExport, 1, 4)
+        self.btnLoadUser = QtWidgets.QPushButton("加载用户视频")
+        self.btnLoadRef = QtWidgets.QPushButton("加载参考视频")
+        self.btnCamToggle = QtWidgets.QPushButton("开启摄像头") # Merged
+        self.camCombo = QtWidgets.QComboBox()
+        # Removed Refresh
+        
+        self.btnPlayReset = QtWidgets.QPushButton("开始") # Merged Play/Reset
+        self.btnPauseResume = QtWidgets.QPushButton("暂停") # Merged Pause/Resume
+        self.btnExtract = QtWidgets.QPushButton("提取坏帧")
+        # Removed Step, Export
+
+        # Layout Logic:
+        # Group 1: Source Selection (Top row)
+        # Group 2: Playback Control (Bottom row, centered, larger)
+
+        ctrlLayout = QtWidgets.QVBoxLayout()
+        ctrlLayout.setSpacing(15)
+
+        # Source Controls
+        sourceLayout = QtWidgets.QHBoxLayout()
+        sourceLayout.addWidget(self.btnLoadUser)
+        sourceLayout.addWidget(self.btnLoadRef)
+        sourceLayout.addWidget(self.camCombo)
+        sourceLayout.addWidget(self.btnCamToggle)
+        sourceLayout.addStretch(1) # Push to left
+        
+        # Playback Controls - Make them BIG
+        playLayout = QtWidgets.QHBoxLayout()
+        playLayout.addStretch(1)
+        
+        # Style Play/Pause buttons to be prominent
+        self.btnPlayReset.setMinimumWidth(120)
+        self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
+        
+        self.btnPauseResume.setMinimumWidth(120)
+        self.btnPauseResume.setStyleSheet("background-color: #F59E0B; font-size: 18px;") # Orange
+        
+        playLayout.addWidget(self.btnPlayReset)
+        playLayout.addWidget(self.btnPauseResume)
+        playLayout.addWidget(self.btnExtract)
+        playLayout.addStretch(1)
+        
+        ctrlLayout.addLayout(sourceLayout)
+        ctrlLayout.addLayout(playLayout)
 
         self.badList = QtWidgets.QListWidget()
         self.badList.setViewMode(QtWidgets.QListView.IconMode)
-        self.badList.setIconSize(QtCore.QSize(160, 90))
+        self.badList.setIconSize(QtCore.QSize(200, 112)) # Larger thumbnails
         self.badList.setResizeMode(QtWidgets.QListWidget.Adjust)
         self.badList.setUniformItemSizes(True)
-        self.badList.setMaximumHeight(130) # Limit height to make room for chart
+        # Remove fixed max height, let layout manage
+        # self.badList.setMaximumHeight(160) 
 
         self.scoreChart = ScoreChartWidget()
+        self.scoreChart.setMinimumHeight(120) # Ensure it has some height
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20) # Add margin around window
+        layout.setSpacing(15) # Increase spacing between elements
+        
+        # 1. Top Bar (Score) - Fixed height ~100px
         layout.addLayout(topLayout)
-        layout.addLayout(stageLayout)
+        
+        # 2. Video Stage - 60% of space, try to keep 16:9
+        # To enforce ratio, we might need to be careful.
+        # But simple stretch factor is easiest.
+        layout.addLayout(stageLayout, 6) 
+        
+        # 3. Controls - Fixed height
         layout.addLayout(ctrlLayout)
-        layout.addWidget(QtWidgets.QLabel("坏帧预览："))
-        layout.addWidget(self.badList)
-        layout.addWidget(QtWidgets.QLabel("分数趋势："))
-        layout.addWidget(self.scoreChart, 1) # Give chart remaining space
+        
+        # 4. Bottom Area (Bad Frames + Chart) - Remaining space (~30-40%)
+        # We can put them in a HBox or VBox depending on design.
+        # User said "Bottom chart", so maybe side-by-side or stacked?
+        # Original was stacked. Let's keep stacked but allocate space.
+        
+        bottomLayout = QtWidgets.QHBoxLayout()
+        bottomLayout.setSpacing(20)
+        
+        # Left: Bad Frames List (Fixed width or proportional?)
+        # Right: Chart
+        
+        # Let's group Bad Frames and Chart side-by-side to save vertical space for video?
+        # Or keep vertical. If video is 60%, we have 40% left.
+        # Top bar ~10%, Controls ~10%, Bottom ~20%.
+        
+        # Let's try side-by-side for bottom area to give more height to video.
+        badGroup = QtWidgets.QVBoxLayout()
+        badGroup.addWidget(QtWidgets.QLabel("坏帧预览："))
+        badGroup.addWidget(self.badList)
+        
+        chartGroup = QtWidgets.QVBoxLayout()
+        chartGroup.addWidget(QtWidgets.QLabel("分数趋势："))
+        chartGroup.addWidget(self.scoreChart)
+        
+        bottomLayout.addLayout(badGroup, 1)
+        bottomLayout.addLayout(chartGroup, 2) # Chart wider
+        
+        layout.addLayout(bottomLayout, 3) # Allocate weight 3 to bottom (Video is 6)
+        
+        # Adjust stretches:
+        # Top: 0 (fixed)
+        # Video: 6
+        # Controls: 0 (fixed)
+        # Bottom: 3
+        # Total flexible = 9. Video gets 6/9 = 66%. Close to 60%.
+
 
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(33)  # ~30 FPS
@@ -135,14 +250,11 @@ class MainWindow(QtWidgets.QWidget):
 
         self.btnLoadUser.clicked.connect(self.load_user_video)
         self.btnLoadRef.clicked.connect(self.load_ref_video)
-        self.btnStartCam.clicked.connect(self.start_cam)
-        self.btnStopCam.clicked.connect(self.stop_cam)
-        self.btnRefreshCams.clicked.connect(self.enumerate_cams)
-        self.btnPlay.clicked.connect(self.play)
-        self.btnPause.clicked.connect(self.pause)
-        self.btnStep.clicked.connect(self.step)
+        self.btnCamToggle.clicked.connect(self.toggle_cam)
+        # self.btnRefreshCams.clicked.connect(self.enumerate_cams)
+        self.btnPlayReset.clicked.connect(self.play_reset)
+        self.btnPauseResume.clicked.connect(self.pause_resume)
         self.btnExtract.clicked.connect(self.extract_bad)
-        self.btnExport.clicked.connect(self.export_pdf)
         QtCore.QTimer.singleShot(0, self.enumerate_cams)
 
     def enumerate_cams(self):
@@ -191,6 +303,16 @@ class MainWindow(QtWidgets.QWidget):
         self.playing = False
         self.update_timer_interval()
 
+    def toggle_cam(self):
+        if self.useCam:
+            self.stop_cam()
+            self.btnCamToggle.setText("开启摄像头")
+            self.btnCamToggle.setStyleSheet("") # Reset style
+        else:
+            self.start_cam()
+            self.btnCamToggle.setText("关闭摄像头")
+            self.btnCamToggle.setStyleSheet("background-color: #EF4444; border-color: #EF4444;") # Red
+
     def start_cam(self):
         self.useCam = True
         if self.userReader:
@@ -203,7 +325,8 @@ class MainWindow(QtWidgets.QWidget):
         
         self.playing = True
         self.update_timer_interval()
-
+        # Ensure chart is ready?
+        
     def stop_cam(self):
         self.useCam = False
         if self.userReader:
@@ -212,13 +335,11 @@ class MainWindow(QtWidgets.QWidget):
         self.playing = False
         self.update_timer_interval()
 
-    def play(self):
-        if self.playing: return
-        
-        # Reset chart
+    def play_reset(self):
+        # Always restart from beginning
         self.scoreChart.reset()
         
-        # Ensure paused while resetting/counting down
+        # Reset readers
         if self.userReader: 
             self.userReader.pause()
             self.userReader.reset()
@@ -231,6 +352,23 @@ class MainWindow(QtWidgets.QWidget):
         self.scoreLabel.setText(str(self._countdown_val))
         self.countdown_timer.start()
         
+        # Update UI state
+        self.btnPauseResume.setText("暂停")
+        
+    def pause_resume(self):
+        if self.playing:
+            self.pause()
+            self.btnPauseResume.setText("继续")
+        else:
+            self.resume()
+            self.btnPauseResume.setText("暂停")
+
+    def resume(self):
+        self.playing = True
+        # Resume threads
+        if self.userReader: self.userReader.resume()
+        if self.refReader: self.refReader.resume()
+
     def on_countdown_tick(self):
         self._countdown_val -= 1
         if self._countdown_val > 0:
@@ -253,9 +391,7 @@ class MainWindow(QtWidgets.QWidget):
         if self.userReader: self.userReader.pause()
         if self.refReader: self.refReader.pause()
 
-    def step(self):
-        self.playing = False
-        self.read_and_process(step=True)
+    # Removed step()
 
     def on_tick(self):
         if self.playing:
@@ -406,7 +542,16 @@ class MainWindow(QtWidgets.QWidget):
 
     def draw_skeleton_on_panel(self, panel: QtWidgets.QLabel, frame_bgr, landmarks, diffs=None):
         # Resize for display performance first
-        MAX_DISP_W = 640
+        # But wait, if we resize to 16:9 fixed, we might stretch.
+        # Let's keep original aspect ratio but fit into panel size?
+        # Actually panel.setScaledContents(False) + setPixmap with KeepAspectRatio is better.
+        # But we need to draw lines first on the original frame (or a resized copy).
+        
+        # 1. Resize copy to a reasonable size to speed up drawing (e.g. max 1280 width)
+        # Don't force 640x360 unless we want low res.
+        # Let's just use the frame as is if it's small enough, or downscale if huge (4K).
+        
+        MAX_DISP_W = 1280
         h_orig, w_orig = frame_bgr.shape[:2]
         if w_orig > MAX_DISP_W:
             scale = MAX_DISP_W / float(w_orig)
@@ -433,11 +578,23 @@ class MainWindow(QtWidgets.QWidget):
                         color = (34, 197, 94)
                         if d >= 40: color = (239, 68, 68)
                         elif d >= 20: color = (245, 158, 11)
-                        cv2.putText(canvas, f"{int(round(d))}°", (pts[i][0]+6, pts[i][1]-6),
+                        # OpenCV putText doesn't support unicode like ° well on Windows/default font
+                        # Use ASCII or PIL. For speed, just use "d" or nothing
+                        cv2.putText(canvas, f"{int(round(d))}", (pts[i][0]+6, pts[i][1]-6),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
         
         qimg = self.frame_to_qimage(canvas)
-        panel.setPixmap(QtGui.QPixmap.fromImage(qimg))
+        
+        # Scale to fit panel size while maintaining aspect ratio
+        panel_w = panel.width()
+        panel_h = panel.height()
+        if panel_w > 10 and panel_h > 10:
+             scaled_pixmap = QtGui.QPixmap.fromImage(qimg).scaled(
+                 panel_w, panel_h, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+             )
+             panel.setPixmap(scaled_pixmap)
+        else:
+             panel.setPixmap(QtGui.QPixmap.fromImage(qimg))
 
     def frame_to_qimage(self, frame_bgr):
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
