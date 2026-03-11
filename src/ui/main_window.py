@@ -297,11 +297,34 @@ class MainWindow(QtWidgets.QWidget):
         if self.refReader:
             self.refReader.stop()
         self.refReader = VideoReader(path)
+        self.refReader.finished.connect(self.on_playback_finished) # Connect signal
         self.refReader.start()
         # Pause initially
         self.refReader.pause()
         self.playing = False
         self.update_timer_interval()
+
+    def on_playback_finished(self):
+        self.pause() # Stop threads
+        
+        # Calculate final score
+        avg_score = 0
+        if self.scoreChart.scores:
+            avg_score = sum(self.scoreChart.scores) / len(self.scoreChart.scores)
+            
+        # Show Summary Dialog
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("练习结束")
+        msg.setText(f"<h3>最终得分: {int(avg_score)} 分</h3>")
+        msg.setInformativeText(f"共记录 {len(self.scoreChart.scores)} 个有效评分点。\n\n做得不错！")
+        msg.setStyleSheet("QLabel{min-width: 300px; font-size: 16px;} QPushButton{ font-size: 14px; }")
+        msg.exec_()
+        
+        # Reset UI state to "Ready to Start"
+        self.btnPlayReset.setText("开始")
+        self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
+        self.btnPauseResume.setText("暂停")
+        self.btnPauseResume.setEnabled(False) # Disable pause when stopped
 
     def toggle_cam(self):
         if self.useCam:
@@ -336,24 +359,34 @@ class MainWindow(QtWidgets.QWidget):
         self.update_timer_interval()
 
     def play_reset(self):
-        # Always restart from beginning
-        self.scoreChart.reset()
-        
-        # Reset readers
-        if self.userReader: 
-            self.userReader.pause()
-            self.userReader.reset()
-        if self.refReader: 
-            self.refReader.pause()
-            self.refReader.reset()
-        
-        # Start countdown
-        self._countdown_val = 3
-        self.scoreLabel.setText(str(self._countdown_val))
-        self.countdown_timer.start()
-        
-        # Update UI state
-        self.btnPauseResume.setText("暂停")
+        # This button now acts as Start / Stop
+        if self.playing or (self.countdown_timer.isActive()):
+            # User clicked "Stop"
+            self.on_playback_finished() # Show score and stop
+            self.btnPlayReset.setText("开始")
+            self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
+        else:
+            # User clicked "Start" -> Reset and Start
+            self.scoreChart.reset()
+            self.btnPlayReset.setText("停止")
+            self.btnPlayReset.setStyleSheet("background-color: #EF4444; font-size: 18px;") # Red
+            
+            # Reset readers
+            if self.userReader: 
+                self.userReader.pause()
+                self.userReader.reset()
+            if self.refReader: 
+                self.refReader.pause()
+                self.refReader.reset()
+            
+            # Start countdown
+            self._countdown_val = 3
+            self.scoreLabel.setText(str(self._countdown_val))
+            self.countdown_timer.start()
+            
+            # Update Pause/Resume state
+            self.btnPauseResume.setText("暂停")
+            self.btnPauseResume.setEnabled(True)
         
     def pause_resume(self):
         if self.playing:

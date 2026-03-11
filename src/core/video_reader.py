@@ -21,6 +21,8 @@ class VideoReader(QtCore.QThread):
         self._seek_req = -1 # -1 means no seek
         self._is_paused = False # For file playback control
 
+    finished = QtCore.pyqtSignal() # Signal when video ends
+
     def run(self):
         try:
             if isinstance(self.source, int):
@@ -84,9 +86,11 @@ class VideoReader(QtCore.QThread):
                     # Usually setting BUFFERSIZE=1 is enough.
                     pass
                 else:
-                    if not self.is_cam: # Loop video
-                        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        last_time = time.time() # Reset timer on loop
+                    if not self.is_cam: # End of video
+                        # Stop playback, don't loop
+                        self.running = False
+                        self.finished.emit()
+                        break
                     else:
                         # Camera disconnect?
                         time.sleep(0.1)
