@@ -177,7 +177,7 @@ class PoseWorker(QtCore.QObject):
         offset = current_ref_idx - best_idx
         
         if offset > 4: # ~130ms behind
-            return "快点! (太慢)"
+            return "Hurry Up! (Too Slow)"
         elif offset < -2:
             pass
             
@@ -200,6 +200,6 @@ class PoseWorker(QtCore.QObject):
             
             u_offset = curr_u_idx - best_u_idx
             if u_offset > 4:
-                return "慢点! (太快)"
+                return "Slow Down! (Too Fast)"
 
         return "Perfect" if abs(offset) <= 2 else ""

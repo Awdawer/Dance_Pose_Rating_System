@@ -12,7 +12,7 @@ from src.ui.components import VideoPanel, ScoreChartWidget
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Dance Pose Scoring (Python GUI)")
+        self.setWindowTitle("Dance Pose Scoring System")
         self.resize(1400, 900)
         
         # Apply Dark Theme
@@ -71,7 +71,7 @@ class MainWindow(QtWidgets.QWidget):
 
         model_path = ensure_model()
         if not model_path or not os.path.exists(model_path):
-            QtWidgets.QMessageBox.critical(self, "错误", "模型文件缺失")
+            QtWidgets.QMessageBox.critical(self, "Error", "Model file missing")
             return
 
         self.worker_thread = QtCore.QThread(self)
@@ -91,12 +91,12 @@ class MainWindow(QtWidgets.QWidget):
         self.refPanel = VideoPanel()
         self.scoreLabel = QtWidgets.QLabel("-- %")
         f = self.scoreLabel.font()
-        f.setPointSize(48) # Much larger score
+        f.setPointSize(72) # Much larger score
         f.setBold(True)
         self.scoreLabel.setFont(f)
         self.hintLabel = QtWidgets.QLabel("")
         f2 = self.hintLabel.font()
-        f2.setPointSize(36) # Larger timing hint
+        f2.setPointSize(56) # Larger timing hint
         f2.setBold(True)
         self.hintLabel.setFont(f2)
         self.hintLabel.setStyleSheet("color: #FBBF24;")
@@ -117,7 +117,7 @@ class MainWindow(QtWidgets.QWidget):
         self.lastDiffs = None
 
         topLayout = QtWidgets.QHBoxLayout()
-        topLayout.addWidget(QtWidgets.QLabel("分数："))
+        topLayout.addWidget(QtWidgets.QLabel("Score:"))
         topLayout.addWidget(self.scoreLabel)
         topLayout.addStretch(1)
         topLayout.addWidget(self.hintLabel)
@@ -133,15 +133,15 @@ class MainWindow(QtWidgets.QWidget):
         self.countdown_timer.setInterval(1000)
         self.countdown_timer.timeout.connect(self.on_countdown_tick)
 
-        self.btnLoadUser = QtWidgets.QPushButton("加载用户视频")
-        self.btnLoadRef = QtWidgets.QPushButton("加载参考视频")
-        self.btnCamToggle = QtWidgets.QPushButton("开启摄像头") # Merged
+        self.btnLoadUser = QtWidgets.QPushButton("Load User Video")
+        self.btnLoadRef = QtWidgets.QPushButton("Load Reference Video")
+        self.btnCamToggle = QtWidgets.QPushButton("Start Camera") # Merged
         self.camCombo = QtWidgets.QComboBox()
         # Removed Refresh
         
-        self.btnPlayReset = QtWidgets.QPushButton("开始") # Merged Play/Reset
-        self.btnPauseResume = QtWidgets.QPushButton("暂停") # Merged Pause/Resume
-        self.btnExtract = QtWidgets.QPushButton("提取坏帧")
+        self.btnPlayReset = QtWidgets.QPushButton("Start") # Merged Play/Reset
+        self.btnPauseResume = QtWidgets.QPushButton("Pause") # Merged Pause/Resume
+        self.btnExtract = QtWidgets.QPushButton("Extract Bad Frames")
         # Removed Step, Export
 
         # Layout Logic:
@@ -221,11 +221,11 @@ class MainWindow(QtWidgets.QWidget):
         
         # Let's try side-by-side for bottom area to give more height to video.
         badGroup = QtWidgets.QVBoxLayout()
-        badGroup.addWidget(QtWidgets.QLabel("坏帧预览："))
+        badGroup.addWidget(QtWidgets.QLabel("Bad Frames:"))
         badGroup.addWidget(self.badList)
         
         chartGroup = QtWidgets.QVBoxLayout()
-        chartGroup.addWidget(QtWidgets.QLabel("分数趋势："))
+        chartGroup.addWidget(QtWidgets.QLabel("Score Trend:"))
         chartGroup.addWidget(self.scoreChart)
         
         bottomLayout.addLayout(badGroup, 1)
@@ -274,10 +274,10 @@ class MainWindow(QtWidgets.QWidget):
             if name:
                 self.camCombo.addItem(name, i)
         if not found:
-            self.camCombo.addItem("无可用摄像头", None)
+            self.camCombo.addItem("No Camera Found", None)
 
     def load_user_video(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "选择用户视频", "", "Video Files (*.mp4 *.avi *.mov)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select User Video", "", "Video Files (*.mp4 *.avi *.mov)")
         if not path:
             return
         self.useCam = False
@@ -291,7 +291,7 @@ class MainWindow(QtWidgets.QWidget):
         self.update_timer_interval()
 
     def load_ref_video(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "选择参考视频", "", "Video Files (*.mp4 *.avi *.mov)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Reference Video", "", "Video Files (*.mp4 *.avi *.mov)")
         if not path:
             return
         if self.refReader:
@@ -314,26 +314,33 @@ class MainWindow(QtWidgets.QWidget):
             
         # Show Summary Dialog
         msg = QtWidgets.QMessageBox(self)
-        msg.setWindowTitle("练习结束")
-        msg.setText(f"<h3>最终得分: {int(avg_score)} 分</h3>")
-        msg.setInformativeText(f"共记录 {len(self.scoreChart.scores)} 个有效评分点。\n\n做得不错！")
+        msg.setWindowTitle("Session Ended")
+        msg.setText(f"<h3>Final Score: {int(avg_score)} pts</h3>")
+        msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\nGreat Job!")
         msg.setStyleSheet("QLabel{min-width: 300px; font-size: 16px;} QPushButton{ font-size: 14px; }")
+        
+        # Force OK button text
+        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        ok_btn = msg.button(QtWidgets.QMessageBox.Ok)
+        if ok_btn:
+            ok_btn.setText("OK")
+
         msg.exec_()
         
         # Reset UI state to "Ready to Start"
-        self.btnPlayReset.setText("开始")
+        self.btnPlayReset.setText("Start")
         self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
-        self.btnPauseResume.setText("暂停")
+        self.btnPauseResume.setText("Pause")
         self.btnPauseResume.setEnabled(False) # Disable pause when stopped
 
     def toggle_cam(self):
         if self.useCam:
             self.stop_cam()
-            self.btnCamToggle.setText("开启摄像头")
+            self.btnCamToggle.setText("Start Camera")
             self.btnCamToggle.setStyleSheet("") # Reset style
         else:
             self.start_cam()
-            self.btnCamToggle.setText("关闭摄像头")
+            self.btnCamToggle.setText("Stop Camera")
             self.btnCamToggle.setStyleSheet("background-color: #EF4444; border-color: #EF4444;") # Red
 
     def start_cam(self):
@@ -363,12 +370,12 @@ class MainWindow(QtWidgets.QWidget):
         if self.playing or (self.countdown_timer.isActive()):
             # User clicked "Stop"
             self.on_playback_finished() # Show score and stop
-            self.btnPlayReset.setText("开始")
+            self.btnPlayReset.setText("Start")
             self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
         else:
             # User clicked "Start" -> Reset and Start
             self.scoreChart.reset()
-            self.btnPlayReset.setText("停止")
+            self.btnPlayReset.setText("Stop")
             self.btnPlayReset.setStyleSheet("background-color: #EF4444; font-size: 18px;") # Red
             
             # Reset readers
@@ -385,16 +392,16 @@ class MainWindow(QtWidgets.QWidget):
             self.countdown_timer.start()
             
             # Update Pause/Resume state
-            self.btnPauseResume.setText("暂停")
+            self.btnPauseResume.setText("Pause")
             self.btnPauseResume.setEnabled(True)
         
     def pause_resume(self):
         if self.playing:
             self.pause()
-            self.btnPauseResume.setText("继续")
+            self.btnPauseResume.setText("Resume")
         else:
             self.resume()
-            self.btnPauseResume.setText("暂停")
+            self.btnPauseResume.setText("Pause")
 
     def resume(self):
         self.playing = True
@@ -450,9 +457,9 @@ class MainWindow(QtWidgets.QWidget):
             # Show timing hint
             if timing_hint:
                 self.hintLabel.setText(timing_hint)
-                if "快点" in timing_hint:
+                if "Hurry" in timing_hint:
                     self.hintLabel.setStyleSheet("color: #F87171;") # Red
-                elif "慢点" in timing_hint:
+                elif "Slow" in timing_hint:
                     self.hintLabel.setStyleSheet("color: #60A5FA;") # Blue
                 else:
                     self.hintLabel.setStyleSheet("color: #34D399;") # Green
@@ -649,9 +656,9 @@ class MainWindow(QtWidgets.QWidget):
             from reportlab.lib.pagesizes import A4
             from reportlab.lib.utils import ImageReader
         except Exception:
-            QtWidgets.QMessageBox.warning(self, "提示", "未安装 reportlab，无法导出PDF。请先 pip install reportlab")
+            QtWidgets.QMessageBox.warning(self, "Warning", "Reportlab not installed. Please pip install reportlab")
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "保存报告", "pose_report.pdf", "PDF (*.pdf)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save Report", "pose_report.pdf", "PDF (*.pdf)")
         if not path:
             return
         c = pdfcanvas.Canvas(path, pagesize=A4)
@@ -681,4 +688,4 @@ class MainWindow(QtWidgets.QWidget):
                 c.showPage()
                 y = h - 50
         c.save()
-        QtWidgets.QMessageBox.information(self, "完成", "PDF报告已导出")
+        QtWidgets.QMessageBox.information(self, "Done", "PDF Report Exported")
