@@ -4,7 +4,7 @@ import numpy as np
 from queue import Queue, Empty
 from PyQt5 import QtCore
 
-from src.utils.geometry import compute_angles
+from src.utils.geometry import compute_angles, compute_angle_confidence
 from src.core.scoring import score_angles, _select_points_with_weights, _w_procrustes_dist, _dist_to_score
 
 class PoseWorker(QtCore.QObject):
@@ -115,7 +115,7 @@ class PoseWorker(QtCore.QObject):
         for lm in res.pose_landmarks[0]:
             fx = (x0 + float(lm.x) * cw) / float(w)
             fy = (y0 + float(lm.y) * ch) / float(h)
-            out.append({"x": fx, "y": fy})
+            out.append({"x": fx, "y": fy, "v": float(lm.visibility)})
 
         # Update ROI for next frame
         xs = [p["x"] for p in out]
@@ -131,22 +131,30 @@ class PoseWorker(QtCore.QObject):
         au = compute_angles(u_lm)
         ar = compute_angles(r_lm)
         
-        # Calculate angle score percent
-        angle_percent, diffs = score_angles(au, ar)
+        # Calculate angle confidence based on visibility
+        u_conf = compute_angle_confidence(u_lm)
+        r_conf = compute_angle_confidence(r_lm)
+        
+        # Combine confidence: min of user and ref
+        combined_conf = {}
+        for k in u_conf:
+            # Default confidence to 0.0 if missing
+            c_u = u_conf.get(k, 0.0)
+            c_r = r_conf.get(k, 0.0)
+            combined_conf[k] = min(c_u, c_r)
+
+        # Calculate angle score percent with confidence weights
+        angle_percent, diffs = score_angles(au, ar, angle_weights=combined_conf)
         
         # 2. Procrustes-based scoring (positional)
+        # _select_points_with_weights handles visibility internally now
         pu, wu = _select_points_with_weights(u_lm)
         pr, wr = _select_points_with_weights(r_lm)
+        
         d = _w_procrustes_dist(pu, pr, np.minimum(wu, wr))
         procrustes_percent = _dist_to_score(d, k=self.k_decay, gamma=self.gamma)
         
         # 3. Combine scores
-        # Procrustes is good for overall shape, Angles are good for limb correctness.
-        # Let's weight them. If pose is totally wrong, both should be low.
-        # If we just average, a 0 in one and 100 in other gives 50.
-        # But if angles are wrong, pose is wrong.
-        # Let's use a weighted average but maybe bias towards the lower one?
-        # Simple weighted average for now: 40% Procrustes, 60% Angles (angles are stricter)
         final_percent = 0.4 * procrustes_percent + 0.6 * angle_percent
         
         return final_percent, diffs

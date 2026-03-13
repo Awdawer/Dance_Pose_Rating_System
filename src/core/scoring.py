@@ -66,9 +66,22 @@ def _select_points_with_weights(lms, include_hands=False):
     """Select key landmarks and assign weights for Procrustes analysis."""
     pts = []
     ws = []
+    
+    def get_v(i):
+        if i is None or i >= len(lms): return 0.0
+        p = lms[i]
+        if isinstance(p, dict):
+            return p.get("v", 1.0)
+        return 1.0
+
     def add_idx(i, w):
         if i is None:
             pts.append([0.0, 0.0]); ws.append(0.0); return
+            
+        vis = get_v(i)
+        if vis < 0.5:
+            w = 0.0
+            
         if i < len(lms):
             pts.append([float(lms[i]["x"]), float(lms[i]["y"])]); ws.append(float(w))
         else:
@@ -98,19 +111,28 @@ def _select_points_with_weights(lms, include_hands=False):
         p = lms[idx]; return float(p["x"]), float(p["y"])
     ls = get_xy(11); rs = get_xy(12)
     lh = get_xy(23); rh = get_xy(24)
+    lsv = get_v(11); rsv = get_v(12)
+    lhv = get_v(23); rhv = get_v(24)
+    
     if ls and rs:
         add_idx(None, 0.0)  # placeholder to keep list alignment
-        pts[-1] = [ (ls[0]+rs[0])/2.0, (ls[1]+rs[1])/2.0 ]; ws[-1] = 1.0 # Mid-Shoulder (reduced from 1.5)
+        if lsv < 0.5 or rsv < 0.5:
+             pts[-1] = [ (ls[0]+rs[0])/2.0, (ls[1]+rs[1])/2.0 ]; ws[-1] = 0.0
+        else:
+             pts[-1] = [ (ls[0]+rs[0])/2.0, (ls[1]+rs[1])/2.0 ]; ws[-1] = 1.0 # Mid-Shoulder
     else:
         add_idx(None, 0.0)
     if lh and rh:
         add_idx(None, 0.0)
-        pts[-1] = [ (lh[0]+rh[0])/2.0, (lh[1]+rh[1])/2.0 ]; ws[-1] = 1.0 # Mid-Hip (reduced from 1.5)
+        if lhv < 0.5 or rhv < 0.5:
+            pts[-1] = [ (lh[0]+rh[0])/2.0, (lh[1]+rh[1])/2.0 ]; ws[-1] = 0.0
+        else:
+            pts[-1] = [ (lh[0]+rh[0])/2.0, (lh[1]+rh[1])/2.0 ]; ws[-1] = 1.0 # Mid-Hip
     else:
         add_idx(None, 0.0)
     return np.array(pts, dtype=np.float32), np.array(ws, dtype=np.float32)
 
-def score_angles(user_angles, ref_angles):
+def score_angles(user_angles, ref_angles, angle_weights=None):
     """Score the pose based on angular differences."""
     diffs = {}
     weights = {
@@ -126,6 +148,11 @@ def score_angles(user_angles, ref_angles):
     total = 0.0
     sum_w = 0.0
     for k, w in weights.items():
+        if angle_weights and k in angle_weights:
+            conf = angle_weights[k]
+            if conf < 0.5:
+                w = 0.0
+        
         d = abs(user_angles.get(k, 0.0) - ref_angles.get(k, 0.0))
         diffs[k] = d
         pj = score_diff(d)
