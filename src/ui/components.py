@@ -20,16 +20,34 @@ class ScoreChartWidget(QtWidgets.QWidget):
         super().__init__(*args, **kwargs)
         self.setMinimumHeight(150)
         self.setStyleSheet("background: #222; border-radius: 6px;")
-        self.scores = []
-        self.max_points = 300 # Approx 10 seconds at 30fps, or scroll? 
-        # Let's auto-scale X, but keep a reasonable buffer.
+        self.scores = []  # 实时评分历史
+        self.dtw_scores = []  # DTW评分历史
+        self.max_points = 300  # Approx 10 seconds at 30fps
         
     def add_score(self, score):
+        """兼容旧接口，只添加实时评分"""
         self.scores.append(score)
+        self.dtw_scores.append(score)  # DTW评分相同
+        self._trim_data()
         self.update()
+    
+    def add_scores(self, real_time_score, dtw_score):
+        """同时添加两个评分"""
+        self.scores.append(real_time_score)
+        self.dtw_scores.append(dtw_score)
+        self._trim_data()
+        self.update()
+    
+    def _trim_data(self):
+        """保持数据长度在限制内"""
+        if len(self.scores) > self.max_points:
+            self.scores = self.scores[-self.max_points:]
+        if len(self.dtw_scores) > self.max_points:
+            self.dtw_scores = self.dtw_scores[-self.max_points:]
         
     def reset(self):
         self.scores = []
+        self.dtw_scores = []
         self.update()
         
     def paintEvent(self, event):
@@ -80,53 +98,60 @@ class ScoreChartWidget(QtWidgets.QWidget):
             painter.setPen(QtGui.QColor("#AAA"))
             painter.drawText(5, y - 5, f"{val}%")
 
-        if len(self.scores) < 2:
-            return
-
-        # Draw Line
-        path = QtGui.QPainterPath()
+        # 绘制两条线：实时评分（绿色）和DTW评分（蓝色）
+        self._draw_line(painter, w, h, val_to_y, self.scores, 
+                       QtGui.QColor("#10B981"), QtGui.QColor("#059669"),  # 绿色系
+                       draw_fill=True, label="Real-time")
         
-        n = len(self.scores)
+        if len(self.dtw_scores) >= 2:
+            self._draw_line(painter, w, h, val_to_y, self.dtw_scores,
+                           QtGui.QColor("#60A5FA"), QtGui.QColor("#3B82F6"),  # 蓝色系
+                           draw_fill=False, label="DTW")
+    
+    def _draw_line(self, painter, w, h, val_to_y, scores, color_start, color_end, draw_fill=True, label=""):
+        """绘制单条折线"""
+        if len(scores) < 2:
+            return
+        
+        n = len(scores)
         step_x = w / max(n - 1, 1)
         
-        start_y = val_to_y(self.scores[0])
+        # 绘制折线路径
+        path = QtGui.QPainterPath()
+        start_y = val_to_y(scores[0])
         path.moveTo(0, start_y)
         
         for i in range(1, n):
             x = i * step_x
-            y = val_to_y(self.scores[i])
-            # Bezier curve for smooth look? Or straight for accuracy?
-            # Let's keep straight for performance but add glow
+            y = val_to_y(scores[i])
             path.lineTo(x, y)
-            
-        # Stroke - Neon Blue/Cyan Gradient
-        grad_pen = QtGui.QLinearGradient(0, 0, w, 0)
-        grad_pen.setColorAt(0, QtGui.QColor("#00C6FF")) # Cyan
-        grad_pen.setColorAt(1, QtGui.QColor("#0072FF")) # Blue
         
-        pen_line = QtGui.QPen(QtGui.QBrush(grad_pen), 3)
+        # 线条样式
+        pen_line = QtGui.QPen(color_start, 3)
         pen_line.setJoinStyle(QtCore.Qt.RoundJoin)
         pen_line.setCapStyle(QtCore.Qt.RoundCap)
         painter.setPen(pen_line)
         painter.drawPath(path)
         
-        # Fill gradient area under line
-        fill_path = QtGui.QPainterPath(path)
-        fill_path.lineTo(w, h)
-        fill_path.lineTo(0, h)
-        fill_path.closeSubpath()
+        # 填充区域（仅实时评分）
+        if draw_fill:
+            fill_path = QtGui.QPainterPath(path)
+            fill_path.lineTo(w, h)
+            fill_path.lineTo(0, h)
+            fill_path.closeSubpath()
+            
+            grad_fill = QtGui.QLinearGradient(0, 0, 0, h)
+            grad_fill.setColorAt(0, QtGui.QColor(color_start.red(), color_start.green(), color_start.blue(), 60))
+            grad_fill.setColorAt(1, QtGui.QColor(color_start.red(), color_start.green(), color_start.blue(), 5))
+            painter.fillPath(fill_path, grad_fill)
         
-        grad_fill = QtGui.QLinearGradient(0, 0, 0, h)
-        grad_fill.setColorAt(0, QtGui.QColor(0, 198, 255, 80)) # Semi-transparent Cyan
-        grad_fill.setColorAt(1, QtGui.QColor(0, 114, 255, 10))  # Fading out
-        painter.fillPath(fill_path, grad_fill)
-        
-        # Highlight current point
-        last_x = (n - 1) * step_x
-        last_y = val_to_y(self.scores[-1])
-        painter.setBrush(QtGui.QColor("#FFFFFF"))
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.drawEllipse(QtCore.QPointF(last_x, last_y), 5, 5)
-        # Glow for point
-        painter.setBrush(QtGui.QColor(0, 198, 255, 100))
-        painter.drawEllipse(QtCore.QPointF(last_x, last_y), 10, 10)
+        # 标签（显示在折线末端）
+        if label:
+            last_x = (n - 1) * step_x
+            last_y = val_to_y(scores[-1])
+            painter.setPen(color_start)
+            font = painter.font()
+            font.setPointSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(int(last_x) + 10, int(last_y), label)

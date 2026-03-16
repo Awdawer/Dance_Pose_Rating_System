@@ -6,3 +6,4 @@ numpy==1.26.4
 Pillow==10.2.0
 PyQt5==5.15.11
 reportlab==4.2.5
+numba==0.59.1

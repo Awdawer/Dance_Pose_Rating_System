@@ -1,23 +1,46 @@
 import numpy as np
 
-def score_diff(d):
-    """Convert an angular difference (in degrees) to a score (0-100)."""
+def score_diff(d, tolerance=3.0):
+    """
+    Convert an angular difference (in degrees) to a score (0-100).
+    Added tolerance to handle small detection variations.
+    
+    Args:
+        d: angular difference in degrees
+        tolerance: tolerance threshold, differences below this get full score
+    """
+    # Apply tolerance: small differences are treated as perfect match
+    effective_diff = max(0.0, float(d) - tolerance)
+    
     # 0 deg diff -> 100 score
     # 20 deg diff -> 70 score (100 - 1.5*20)
     # 66 deg diff -> 0 score
-    s = 100.0 - 1.5 * float(d)
+    s = 100.0 - 1.5 * effective_diff
     if s < 0.0:
         s = 0.0
     if s > 100.0:
         s = 100.0
     return s
 
-def _dist_to_score(d, k=5.0, gamma=0.7):
-    """Convert a distance metric (Procrustes) to a score (0-100)."""
-    if d <= 0.0:
+def _dist_to_score(d, k=3.0, gamma=0.5, tolerance=0.02):
+    """
+    Convert a distance metric (Procrustes) to a score (0-100).
+    Adjusted parameters for better tolerance to small variations.
+    
+    Args:
+        d: Procrustes distance
+        k: decay coefficient (reduced from 5.0 for less sensitivity)
+        gamma: gamma correction (reduced from 0.7 for better curve)
+        tolerance: distance below this is treated as perfect match
+    """
+    if d <= tolerance:
         return 100.0
-    # Exponential decay
-    p = float(np.exp(-k * d))
+    
+    # Apply tolerance
+    effective_d = d - tolerance
+    
+    # Exponential decay with adjusted k
+    p = float(np.exp(-k * effective_d))
     # Gamma correction to adjust curve
     p = p ** gamma
     s = 100.0 * p

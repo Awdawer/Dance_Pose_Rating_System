@@ -89,20 +89,36 @@ class MainWindow(QtWidgets.QWidget):
 
         self.userPanel = VideoPanel()
         self.refPanel = VideoPanel()
+        
+        # 实时评分标签
         self.scoreLabel = QtWidgets.QLabel("-- %")
         f = self.scoreLabel.font()
-        f.setPointSize(72) # Much larger score
+        f.setPointSize(18)
         f.setBold(True)
         self.scoreLabel.setFont(f)
+        self.scoreLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.scoreLabel.setStyleSheet("color: #10B981; background-color: #000000; border-radius: 20px; padding: 20px; font-size: 18pt;")
+        
+        # DTW对齐评分标签
+        self.dtwScoreLabel = QtWidgets.QLabel("DTW: -- %")
+        f_dtw = self.dtwScoreLabel.font()
+        f_dtw.setPointSize(18)
+        f_dtw.setBold(True)
+        self.dtwScoreLabel.setFont(f_dtw)
+        self.dtwScoreLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.dtwScoreLabel.setStyleSheet("color: #60A5FA; background-color: #000000; border-radius: 20px; padding: 20px; font-size: 18pt;")
+
         self.hintLabel = QtWidgets.QLabel("")
         f2 = self.hintLabel.font()
-        f2.setPointSize(56) # Larger timing hint
+        f2.setPointSize(24)
         f2.setBold(True)
         self.hintLabel.setFont(f2)
-        self.hintLabel.setStyleSheet("color: #FBBF24;")
+        self.hintLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.hintLabel.setStyleSheet("color: #FBBF24; background-color: #222; border-radius: 15px; padding: 10px; font-size: 24pt;")
 
         self._miss_count = 0
         self._ema_score = None
+        self._ema_dtw_score = None
         self._ema_alpha = 0.3
         self._k_decay = 5.0
         self._gamma = 0.7
@@ -110,6 +126,7 @@ class MainWindow(QtWidgets.QWidget):
         self._tick_count = 0
         self.ts_ms = 0
         self.lastPercent = 0.0
+        self.lastDtwPercent = 0.0
         self.detect_stride_user = 2
         self.detect_stride_ref = 4
         self.lastUserLandmarks = []
@@ -117,8 +134,11 @@ class MainWindow(QtWidgets.QWidget):
         self.lastDiffs = None
 
         topLayout = QtWidgets.QHBoxLayout()
-        topLayout.addWidget(QtWidgets.QLabel("Score:"))
+        topLayout.addWidget(QtWidgets.QLabel("Real-time:"))
         topLayout.addWidget(self.scoreLabel)
+        topLayout.addSpacing(20)
+        topLayout.addWidget(QtWidgets.QLabel("DTW:"))
+        topLayout.addWidget(self.dtwScoreLabel)
         topLayout.addStretch(1)
         topLayout.addWidget(self.hintLabel)
         topLayout.addStretch(1)
@@ -437,34 +457,35 @@ class MainWindow(QtWidgets.QWidget):
         if self.playing:
             self.read_and_process(step=False)
 
-    def on_results_ready(self, u_lms, r_lms, diffs, percent, timing_hint):
+    def on_results_ready(self, u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint):
         if len(u_lms):
             self.lastUserLandmarks = u_lms
         if len(r_lms):
             self.lastRefLandmarks = r_lms
         if len(u_lms) and len(r_lms):
             self.lastDiffs = diffs
+            
+            # 1. 实时评分EMA平滑
             if self._ema_score is None:
-                self._ema_score = percent
+                self._ema_score = real_time_percent
             else:
-                self._ema_score = self._ema_alpha * percent + (1.0 - self._ema_alpha) * self._ema_score
+                self._ema_score = self._ema_alpha * real_time_percent + (1.0 - self._ema_alpha) * self._ema_score
             self.lastPercent = self._ema_score
             self.scoreLabel.setText(f"{int(round(self.lastPercent))} %")
             
-            # Update chart
-            self.scoreChart.add_score(self.lastPercent)
-            
-            # Show timing hint
-            if timing_hint:
-                self.hintLabel.setText(timing_hint)
-                if "Hurry" in timing_hint:
-                    self.hintLabel.setStyleSheet("color: #F87171;") # Red
-                elif "Slow" in timing_hint:
-                    self.hintLabel.setStyleSheet("color: #60A5FA;") # Blue
-                else:
-                    self.hintLabel.setStyleSheet("color: #34D399;") # Green
+            # 2. DTW评分EMA平滑
+            if self._ema_dtw_score is None:
+                self._ema_dtw_score = dtw_percent
             else:
-                self.hintLabel.setText("")
+                self._ema_dtw_score = self._ema_alpha * dtw_percent + (1.0 - self._ema_alpha) * self._ema_dtw_score
+            self.lastDtwPercent = self._ema_dtw_score
+            self.dtwScoreLabel.setText(f"{int(round(self.lastDtwPercent))} %")
+            
+            # 3. 更新双折线图
+            self.scoreChart.add_scores(self.lastPercent, self.lastDtwPercent)
+            
+            # Timing hint disabled
+            self.hintLabel.setText("")
                 
             self._miss_count = 0
         else:
@@ -472,10 +493,13 @@ class MainWindow(QtWidgets.QWidget):
             # Keep last skeleton/diffs to avoid flicker; only clear after sustained misses
             if self._miss_count > 30:
                 self.lastPercent = 0.0
+                self.lastDtwPercent = 0.0
                 self.lastDiffs = None
                 self.scoreLabel.setText("0 %")
+                self.dtwScoreLabel.setText("0 %")
                 self.hintLabel.setText("")
                 self._ema_score = None
+                self._ema_dtw_score = None
 
     def read_and_process(self, step=False):
         user_frame = None

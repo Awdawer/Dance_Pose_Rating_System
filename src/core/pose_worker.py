@@ -12,7 +12,7 @@ class PoseWorker(QtCore.QObject):
     Worker class for heavy MediaPipe processing.
     Runs in a separate thread to keep the GUI responsive.
     """
-    results_ready = QtCore.pyqtSignal(list, list, dict, float, str) # u_lms, r_lms, diffs, percent, timing_hint
+    results_ready = QtCore.pyqtSignal(list, list, dict, float, float, str) # u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint
 
     def __init__(self, model_path):
         super().__init__()
@@ -25,10 +25,9 @@ class PoseWorker(QtCore.QObject):
         self.k_decay = 5.0
         self.gamma = 0.7
         
-        # Timing analysis buffer
-        self.ref_history = [] # List of (timestamp, landmarks)
-        self.user_history = [] # List of (timestamp, landmarks)
-        self.HISTORY_LEN = 30 # Store ~1 second of poses
+        # 历史缓冲区 - 只存储参考视频的历史，用于DTW查找
+        self.ref_history = [] # List of (landmarks, angles)
+        self.HISTORY_LEN = 60 # 存储约2秒的参考帧
 
     def start(self):
         from mediapipe.tasks import python as mp_python
@@ -63,24 +62,17 @@ class PoseWorker(QtCore.QObject):
                 if r_frame is not None:
                     r_lms, self.roi_ref = self.detect_landmarks(r_frame, self.roi_ref)
 
-                percent = 0.0
+                real_time_percent = 0.0
+                dtw_percent = 0.0
                 diffs = {}
                 timing_hint = ""
                 
                 if len(u_lms) and len(r_lms):
-                    percent, diffs = self.compute_and_score(u_lms, r_lms)
-                    
-                    # Update histories for timing check
-                    now = time.time()
-                    self.user_history.append((now, u_lms))
-                    self.ref_history.append((now, r_lms))
-                    
-                    if len(self.user_history) > self.HISTORY_LEN: self.user_history.pop(0)
-                    if len(self.ref_history) > self.HISTORY_LEN: self.ref_history.pop(0)
-                    
+                    # 计算两个评分
+                    real_time_percent, dtw_percent, diffs = self.compute_dual_scores(u_lms, r_lms)
                     timing_hint = self.check_timing(u_lms)
 
-                self.results_ready.emit(u_lms, r_lms, diffs, percent, timing_hint)
+                self.results_ready.emit(u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint)
             except Empty:
                 continue
             except Exception as e:
@@ -126,88 +118,117 @@ class PoseWorker(QtCore.QObject):
         maxy = min(h, int(max(ys) * h) + int(0.1 * h))
         return out, (minx, miny, max(64, maxx - minx), max(64, maxy - miny))
 
-    def compute_and_score(self, u_lm, r_lm):
-        # 1. Angle-based scoring
-        au = compute_angles(u_lm)
-        ar = compute_angles(r_lm)
+    def compute_dual_scores(self, u_lm, r_lm):
+        """
+        计算两个评分：
+        1. 实时评分：用户当前帧 vs 参考当前帧
+        2. DTW评分：用户当前帧 vs 参考历史中最相似帧
         
-        # Calculate angle confidence based on visibility
+        Returns:
+            (real_time_percent, dtw_percent, diffs)
+        """
+        # 计算角度
+        u_angs = compute_angles(u_lm)
+        r_angs = compute_angles(r_lm)
+        
+        # 更新参考历史（只存参考帧）
+        self.ref_history.append((r_lm, r_angs))
+        if len(self.ref_history) > self.HISTORY_LEN:
+            self.ref_history.pop(0)
+        
+        # ========== 1. 实时评分 ==========
+        real_time_percent = self._compute_score(u_lm, u_angs, r_lm, r_angs)
+        
+        # ========== 2. DTW评分 ==========
+        # 在历史参考帧中找到与用户当前帧最相似的一帧
+        best_r_lm, best_r_angs = self._find_best_match_in_history(u_lm, u_angs)
+        
+        if best_r_lm is not None:
+            dtw_percent = self._compute_score(u_lm, u_angs, best_r_lm, best_r_angs)
+        else:
+            # 历史不足，使用当前帧
+            dtw_percent = real_time_percent
+            best_r_lm = r_lm
+            best_r_angs = r_angs
+        
+        # 计算差异（用于可视化）- 使用实时评分的差异
         u_conf = compute_angle_confidence(u_lm)
         r_conf = compute_angle_confidence(r_lm)
+        combined_conf = {k: min(u_conf.get(k, 0.0), r_conf.get(k, 0.0)) for k in u_conf}
+        _, diffs = score_angles(u_angs, r_angs, angle_weights=combined_conf)
         
-        # Combine confidence: min of user and ref
-        combined_conf = {}
-        for k in u_conf:
-            # Default confidence to 0.0 if missing
-            c_u = u_conf.get(k, 0.0)
-            c_r = r_conf.get(k, 0.0)
-            combined_conf[k] = min(c_u, c_r)
-
-        # Calculate angle score percent with confidence weights
-        angle_percent, diffs = score_angles(au, ar, angle_weights=combined_conf)
+        return real_time_percent, dtw_percent, diffs
+    
+    def _compute_score(self, u_lm, u_angs, r_lm, r_angs):
+        """计算单个评分"""
+        # 角度置信度
+        u_conf = compute_angle_confidence(u_lm)
+        r_conf = compute_angle_confidence(r_lm)
+        combined_conf = {k: min(u_conf.get(k, 0.0), r_conf.get(k, 0.0)) for k in u_conf}
         
-        # 2. Procrustes-based scoring (positional)
-        # _select_points_with_weights handles visibility internally now
+        # 角度评分
+        angle_percent, _ = score_angles(u_angs, r_angs, angle_weights=combined_conf)
+        
+        # Procrustes形状评分
         pu, wu = _select_points_with_weights(u_lm)
         pr, wr = _select_points_with_weights(r_lm)
-        
         d = _w_procrustes_dist(pu, pr, np.minimum(wu, wr))
         procrustes_percent = _dist_to_score(d, k=self.k_decay, gamma=self.gamma)
         
-        # 3. Combine scores
-        final_percent = 0.4 * procrustes_percent + 0.6 * angle_percent
+        # 融合
+        return 0.4 * procrustes_percent + 0.6 * angle_percent
+    
+    def _find_best_match_in_history(self, u_lm, u_angs):
+        """
+        在参考历史中找到与用户当前帧最相似的一帧
         
-        return final_percent, diffs
+        Returns:
+            (best_r_lm, best_r_angs) 或 (None, None)
+        """
+        if len(self.ref_history) < 10:
+            return None, None
+        
+        # 构建用户特征向量（8个关键角度）
+        u_vec = np.array([
+            u_angs.get("leftShoulder", 0),
+            u_angs.get("rightShoulder", 0),
+            u_angs.get("leftElbow", 0),
+            u_angs.get("rightElbow", 0),
+            u_angs.get("leftHip", 0),
+            u_angs.get("rightHip", 0),
+            u_angs.get("leftKnee", 0),
+            u_angs.get("rightKnee", 0)
+        ], dtype=np.float32)
+        
+        # 在历史中找到欧氏距离最小的帧
+        best_idx = None
+        best_dist = float('inf')
+        
+        for i, (_, r_angs) in enumerate(self.ref_history):
+            r_vec = np.array([
+                r_angs.get("leftShoulder", 0),
+                r_angs.get("rightShoulder", 0),
+                r_angs.get("leftElbow", 0),
+                r_angs.get("rightElbow", 0),
+                r_angs.get("leftHip", 0),
+                r_angs.get("rightHip", 0),
+                r_angs.get("leftKnee", 0),
+                r_angs.get("rightKnee", 0)
+            ], dtype=np.float32)
+            
+            dist = np.linalg.norm(u_vec - r_vec)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        
+        if best_idx is not None:
+            best_r_lm, best_r_angs = self.ref_history[best_idx]
+            return best_r_lm, best_r_angs
+        
+        return None, None
 
     def check_timing(self, current_u_lms):
-        # We need at least some history to compare
-        if len(self.ref_history) < 10: return ""
-        
-        # Compare current user pose against past reference poses
-        best_score = -1
-        best_idx = -1
-        
-        # Check last 15 frames of reference
-        search_range = self.ref_history[-15:] 
-        current_ref_idx = len(search_range) - 1 # The latest frame is "Now"
-        
-        for i, (ts, r_lms) in enumerate(search_range):
-            au = compute_angles(current_u_lms)
-            ar = compute_angles(r_lms)
-            score = 0
-            for k in au:
-                score += abs(au[k] - ar.get(k, 0))
-            
-            if best_score == -1 or score < best_score:
-                best_score = score
-                best_idx = i
-                
-        offset = current_ref_idx - best_idx
-        
-        if offset > 4: # ~130ms behind
-            return "Hurry Up! (Too Slow)"
-        elif offset < -2:
-            pass
-            
-        # To detect "Too Fast", we need to see if User's PAST pose matches Ref's CURRENT pose.
-        if len(self.user_history) >= 10:
-            curr_r_lms = self.ref_history[-1][1]
-            best_u_score = -1
-            best_u_idx = -1
-            u_search = self.user_history[-15:]
-            curr_u_idx = len(u_search) - 1
-            
-            au_curr_ref = compute_angles(curr_r_lms)
-            
-            for i, (ts, u_lms) in enumerate(u_search):
-                au = compute_angles(u_lms)
-                score = sum(abs(au[k] - au_curr_ref.get(k, 0)) for k in au)
-                if best_u_score == -1 or score < best_u_score:
-                    best_u_score = score
-                    best_u_idx = i
-            
-            u_offset = curr_u_idx - best_u_idx
-            if u_offset > 4:
-                return "Slow Down! (Too Fast)"
-
-        return "Perfect" if abs(offset) <= 2 else ""
+        """
+        节奏分析功能已禁用
+        """
+        return ""
