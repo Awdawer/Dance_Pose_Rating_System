@@ -137,3 +137,9 @@ models/*.task
 
 # Reports
 *.pdf
+
+# Personal documents (not for GitHub)
+reports/个人工作报告*.md
+reports/答辩陈述*.md
+reports/*个人*.md
+reports/*答辩*.md

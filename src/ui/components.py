@@ -14,6 +14,11 @@ class VideoPanel(QtWidgets.QLabel):
     def sizeHint(self):
         # Provide a hint that respects 16:9
         return QtCore.QSize(640, 360)
+        
+    def clear(self):
+        """清空面板，移除显示的内容"""
+        self.setPixmap(QtGui.QPixmap())  # 设置空图片
+        self.update()
 
 class ScoreChartWidget(QtWidgets.QWidget):
     def __init__(self, *args, **kwargs):

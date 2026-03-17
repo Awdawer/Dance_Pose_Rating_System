@@ -1,6 +1,7 @@
 import os
 import cv2
 import time
+import threading
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from src.utils.model_loader import ensure_model
@@ -8,6 +9,16 @@ from src.utils.geometry import POSE_CONNECTIONS
 from src.core.pose_worker import PoseWorker
 from src.core.video_reader import VideoReader
 from src.ui.components import VideoPanel, ScoreChartWidget
+
+# 尝试导入音频播放库
+try:
+    from ffpyplayer.player import MediaPlayer
+    FFPYPLAYER_AVAILABLE = True
+    print("[Audio] Using ffpyplayer for audio playback")
+except ImportError:
+    FFPYPLAYER_AVAILABLE = False
+    print("[Audio] ffpyplayer not available, audio will be disabled")
+    print("[Audio] Install with: pip install ffpyplayer")
 
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
@@ -86,6 +97,12 @@ class MainWindow(QtWidgets.QWidget):
         self.useCam = False
         self.playing = False
         self.badFrames = []  # list of (score, time_str, QImage)
+        
+        # 音频播放器（使用ffpyplayer）
+        self.audioPlayer = None
+        self.audio_path = None
+        self.audio_thread = None
+        self.audio_playing = False
 
         self.userPanel = VideoPanel()
         self.refPanel = VideoPanel()
@@ -162,6 +179,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btnPlayReset = QtWidgets.QPushButton("Start") # Merged Play/Reset
         self.btnPauseResume = QtWidgets.QPushButton("Pause") # Merged Pause/Resume
         self.btnExtract = QtWidgets.QPushButton("Extract Bad Frames")
+        self.btnClear = QtWidgets.QPushButton("Clear Cache")
         # Removed Step, Export
 
         # Layout Logic:
@@ -193,6 +211,7 @@ class MainWindow(QtWidgets.QWidget):
         playLayout.addWidget(self.btnPlayReset)
         playLayout.addWidget(self.btnPauseResume)
         playLayout.addWidget(self.btnExtract)
+        playLayout.addWidget(self.btnClear)
         playLayout.addStretch(1)
         
         ctrlLayout.addLayout(sourceLayout)
@@ -275,6 +294,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btnPlayReset.clicked.connect(self.play_reset)
         self.btnPauseResume.clicked.connect(self.pause_resume)
         self.btnExtract.clicked.connect(self.extract_bad)
+        self.btnClear.clicked.connect(self.clear_cache)
         QtCore.QTimer.singleShot(0, self.enumerate_cams)
 
     def enumerate_cams(self):
@@ -309,6 +329,8 @@ class MainWindow(QtWidgets.QWidget):
         self.userReader.pause()
         self.playing = False
         self.update_timer_interval()
+        # 直接显示视频第一帧预览
+        self.show_video_preview(path, self.userPanel, "User")
 
     def load_ref_video(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Reference Video", "", "Video Files (*.mp4 *.avi *.mov)")
@@ -316,6 +338,14 @@ class MainWindow(QtWidgets.QWidget):
             return
         if self.refReader:
             self.refReader.stop()
+        
+        # 设置音频源
+        if FFPYPLAYER_AVAILABLE:
+            self.audio_path = path
+            print(f"[Audio] Audio path set: {path}")
+        else:
+            print("[Audio] Audio playback disabled (ffpyplayer not installed)")
+        
         self.refReader = VideoReader(path)
         self.refReader.finished.connect(self.on_playback_finished) # Connect signal
         self.refReader.start()
@@ -323,9 +353,14 @@ class MainWindow(QtWidgets.QWidget):
         self.refReader.pause()
         self.playing = False
         self.update_timer_interval()
+        # 直接显示视频第一帧预览
+        self.show_video_preview(path, self.refPanel, "Reference")
 
     def on_playback_finished(self):
         self.pause() # Stop threads
+        
+        # 停止音频
+        self.stop_audio_playback()
         
         # Calculate final score
         avg_score = 0
@@ -406,6 +441,9 @@ class MainWindow(QtWidgets.QWidget):
                 self.refReader.pause()
                 self.refReader.reset()
             
+            # 重置音频
+            self.stop_audio_playback()
+            
             # Start countdown
             self._countdown_val = 3
             self.scoreLabel.setText(str(self._countdown_val))
@@ -428,6 +466,8 @@ class MainWindow(QtWidgets.QWidget):
         # Resume threads
         if self.userReader: self.userReader.resume()
         if self.refReader: self.refReader.resume()
+        # 播放音频
+        self.start_audio_playback()
 
     def on_countdown_tick(self):
         self._countdown_val -= 1
@@ -444,12 +484,16 @@ class MainWindow(QtWidgets.QWidget):
         # Resume threads
         if self.userReader: self.userReader.resume()
         if self.refReader: self.refReader.resume()
+        # 播放音频
+        self.start_audio_playback()
 
     def pause(self):
         self.playing = False
         self.countdown_timer.stop()
         if self.userReader: self.userReader.pause()
         if self.refReader: self.refReader.pause()
+        # 暂停音频
+        self.stop_audio_playback()
 
     # Removed step()
 
@@ -673,6 +717,163 @@ class MainWindow(QtWidgets.QWidget):
             icon = QtGui.QIcon(QtGui.QPixmap.fromImage(qimg).scaled(160, 90, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
             item = QtWidgets.QListWidgetItem(icon, f"{int(round(score))}% @ {tstr}")
             self.badList.addItem(item)
+
+    def clear_cache(self):
+        """清除所有缓存数据，恢复到程序刚启动的状态"""
+        # 1. 暂停播放
+        self.pause()
+        
+        # 2. 重置视频读取器
+        if self.userReader:
+            self.userReader.pause()
+            self.userReader.reset()
+        if self.refReader:
+            self.refReader.pause()
+            self.refReader.reset()
+        
+        # 3. 停止并清除音频
+        self.stop_audio_playback()
+        self.audio_path = None
+        
+        # 4. 清除工作线程的历史缓存
+        self.worker.ref_history.clear()
+        
+        # 4. 重置评分数据
+        self._ema_score = None
+        self._ema_dtw_score = None
+        self.lastPercent = 0.0
+        self.lastDtwPercent = 0.0
+        self.scoreLabel.setText("-- %")
+        self.dtwScoreLabel.setText("DTW: -- %")
+        
+        # 5. 清除坏帧记录
+        self.badFrames.clear()
+        self.badList.clear()
+        
+        # 6. 清除折线图
+        self.scoreChart.reset()
+        
+        # 7. 重置骨架数据
+        self.lastUserLandmarks = []
+        self.lastRefLandmarks = []
+        self.lastDiffs = None
+        
+        # 8. 重置UI状态
+        self.playing = False
+        self.btnPlayReset.setText("Start")
+        self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;")
+        self.btnPauseResume.setText("Pause")
+        self.btnPauseResume.setEnabled(False)
+        
+        # 9. 清空视频面板
+        self.userPanel.clear()
+        self.refPanel.clear()
+        
+        print("[Clear] All cache data cleared. System reset to initial state.")
+
+    def start_audio_playback(self):
+        """使用ffpyplayer开始播放音频"""
+        if not FFPYPLAYER_AVAILABLE or not self.audio_path:
+            return
+        
+        # 如果正在播放，先停止
+        self.stop_audio_playback()
+        
+        def play_audio():
+            try:
+                print(f"[Audio] Starting audio playback: {self.audio_path}")
+                self.audioPlayer = MediaPlayer(self.audio_path)
+                self.audio_playing = True
+                
+                while self.audio_playing:
+                    frame, val = self.audioPlayer.get_frame()
+                    if val == 'eof':
+                        break
+                    if frame is None:
+                        time.sleep(0.01)
+                        continue
+                
+                self.audioPlayer.close_player()
+                print("[Audio] Playback finished")
+            except Exception as e:
+                print(f"[Audio] Playback error: {e}")
+        
+        # 在新线程中播放音频
+        self.audio_thread = threading.Thread(target=play_audio, daemon=True)
+        self.audio_thread.start()
+
+    def stop_audio_playback(self):
+        """停止音频播放"""
+        self.audio_playing = False
+        if self.audioPlayer:
+            try:
+                self.audioPlayer.close_player()
+                self.audioPlayer = None
+                print("[Audio] Stopped")
+            except:
+                pass
+        if self.audio_thread and self.audio_thread.is_alive():
+            self.audio_thread.join(timeout=1.0)
+
+    def on_audio_error(self, error):
+        """音频错误处理"""
+        error_messages = {
+            0: "无错误",
+            1: "资源错误",
+            2: "格式错误",
+            3: "网络错误",
+            4: "访问被拒绝",
+            5: "服务缺失"
+        }
+        print(f"[Audio Error] {error_messages.get(error, f'未知错误: {error}')}")
+        print(f"[Audio Error String] {self.audioPlayer.errorString()}")
+
+    def on_audio_state_changed(self, state):
+        """音频状态变化监听"""
+        states = {
+            0: "停止",
+            1: "播放中",
+            2: "暂停"
+        }
+        print(f"[Audio State] {states.get(state, f'未知状态: {state}')}")
+
+    def show_video_preview(self, video_path, panel, label):
+        """直接读取视频第一帧并显示预览"""
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret:
+                    self.draw_frame_on_panel(panel, frame)
+                    print(f"[Preview] {label} video loaded: {video_path}")
+            cap.release()
+        except Exception as e:
+            print(f"[Preview] Error loading {label} video: {e}")
+
+    def draw_frame_on_panel(self, panel, frame_bgr):
+        """在视频面板上显示一帧图像（无骨架）"""
+        # 调整大小以适应显示
+        MAX_DISP_W = 1280
+        h_orig, w_orig = frame_bgr.shape[:2]
+        if w_orig > MAX_DISP_W:
+            scale = MAX_DISP_W / float(w_orig)
+            canvas = cv2.resize(frame_bgr, (MAX_DISP_W, int(h_orig * scale)), interpolation=cv2.INTER_AREA)
+        else:
+            canvas = frame_bgr.copy()
+
+        # 转换为QImage并显示
+        qimg = self.frame_to_qimage(canvas)
+        
+        # 缩放以适应面板
+        panel_w = panel.width()
+        panel_h = panel.height()
+        if panel_w > 10 and panel_h > 10:
+             scaled_pixmap = QtGui.QPixmap.fromImage(qimg).scaled(
+                 panel_w, panel_h, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+             )
+             panel.setPixmap(scaled_pixmap)
+        else:
+             panel.setPixmap(QtGui.QPixmap.fromImage(qimg))
 
     def export_pdf(self):
         try:
