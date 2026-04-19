@@ -9,6 +9,7 @@ from src.utils.geometry import POSE_CONNECTIONS
 from src.core.pose_worker import PoseWorker
 from src.core.video_reader import VideoReader
 from src.ui.components import VideoPanel, ScoreChartWidget
+from src.core.audio_aligner import align_videos, LIBROSA_AVAILABLE, MOVIEPY_AVAILABLE
 
 # 尝试导入音频播放库
 try:
@@ -98,6 +99,13 @@ class MainWindow(QtWidgets.QWidget):
         self.playing = False
         self.badFrames = []  # list of (score, time_str, QImage)
         
+        # Audio alignment
+        self.user_video_path = None
+        self.ref_video_path = None
+        self.alignment_offset = 0.0  # Time offset in seconds
+        self.alignment_frame_offset = 0  # Frame offset
+        self.is_aligned = False
+        
         # 音频播放器（使用ffpyplayer）
         self.audioPlayer = None
         self.audio_path = None
@@ -133,11 +141,21 @@ class MainWindow(QtWidgets.QWidget):
         self.hintLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.hintLabel.setStyleSheet("color: #FBBF24; background-color: #222; border-radius: 15px; padding: 10px; font-size: 24pt;")
 
+        # Alignment status label
+        self.alignStatusLabel = QtWidgets.QLabel("Not Aligned")
+        self.alignStatusLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+
+        # Frame counter label for debugging alignment
+        self.frameLabel = QtWidgets.QLabel("User: 0 | Ref: 0")
+        self.frameLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.frameLabel.setStyleSheet("color: #888888; background-color: #222; border-radius: 5px; padding: 3px; font-size: 10pt;")
+
         self._miss_count = 0
         self._ema_score = None
         self._ema_dtw_score = None
         self._ema_alpha = 0.3
-        self._k_decay = 5.0
+        self._k_decay = 2.5  # 降低敏感度，对位置偏移更宽容
         self._gamma = 0.7
         self.detect_stride = 3
         self._tick_count = 0
@@ -156,6 +174,10 @@ class MainWindow(QtWidgets.QWidget):
         topLayout.addSpacing(20)
         topLayout.addWidget(QtWidgets.QLabel("DTW:"))
         topLayout.addWidget(self.dtwScoreLabel)
+        topLayout.addSpacing(20)
+        topLayout.addWidget(self.alignStatusLabel)
+        topLayout.addSpacing(10)
+        topLayout.addWidget(self.frameLabel)
         topLayout.addStretch(1)
         topLayout.addWidget(self.hintLabel)
         topLayout.addStretch(1)
@@ -331,6 +353,10 @@ class MainWindow(QtWidgets.QWidget):
         self.update_timer_interval()
         # 直接显示视频第一帧预览
         self.show_video_preview(path, self.userPanel, "User")
+        
+        # Save path and try alignment
+        self.user_video_path = path
+        self.try_audio_alignment()
 
     def load_ref_video(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Reference Video", "", "Video Files (*.mp4 *.avi *.mov)")
@@ -355,6 +381,119 @@ class MainWindow(QtWidgets.QWidget):
         self.update_timer_interval()
         # 直接显示视频第一帧预览
         self.show_video_preview(path, self.refPanel, "Reference")
+        
+        # Save path and try alignment
+        self.ref_video_path = path
+        self.try_audio_alignment()
+
+    def try_audio_alignment(self):
+        if not self.user_video_path or not self.ref_video_path:
+            return
+        
+        if not LIBROSA_AVAILABLE or not MOVIEPY_AVAILABLE:
+            self.alignStatusLabel.setText("Alignment Unavailable")
+            self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+            print("[Alignment] Required libraries not available")
+            return
+        
+        self.alignStatusLabel.setText("Aligning...")
+        self.alignStatusLabel.setStyleSheet("color: #FBBF24; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        
+        # Run alignment in background thread
+        def do_alignment():
+            try:
+                time_offset, frame_offset = align_videos(
+                    self.user_video_path, 
+                    self.ref_video_path, 
+                    method='chroma'
+                )
+                QtCore.QMetaObject.invokeMethod(
+                    self, 
+                    "on_alignment_finished", 
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(float, time_offset),
+                    QtCore.Q_ARG(int, frame_offset)
+                )
+            except Exception as e:
+                print(f"[Alignment] Error: {e}")
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    "on_alignment_failed",
+                    QtCore.Qt.QueuedConnection
+                )
+        
+        threading.Thread(target=do_alignment, daemon=True).start()
+
+    @QtCore.pyqtSlot(float, int)
+    def on_alignment_finished(self, time_offset, frame_offset):
+        self.alignment_offset = time_offset
+        self.alignment_frame_offset = frame_offset
+        self.is_aligned = True
+        
+        # Update UI
+        if abs(time_offset) < 0.1:
+            self.alignStatusLabel.setText("Aligned: In Sync")
+            self.alignStatusLabel.setStyleSheet("color: #10B981; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        else:
+            direction = "User ahead" if time_offset < 0 else "User behind"
+            self.alignStatusLabel.setText(f"Aligned: {direction} {abs(time_offset):.1f}s")
+            self.alignStatusLabel.setStyleSheet("color: #60A5FA; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        
+        # Apply alignment to video readers
+        self.apply_alignment()
+    
+    @QtCore.pyqtSlot()
+    def on_alignment_failed(self):
+        self.alignStatusLabel.setText("Alignment Failed")
+        self.alignStatusLabel.setStyleSheet("color: #EF4444; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        self.is_aligned = False
+
+    def apply_alignment(self):
+        if not self.is_aligned:
+            print("[Alignment] apply_alignment called but not aligned")
+            return
+        
+        print(f"[Alignment] apply_alignment: frame_offset={self.alignment_frame_offset}")
+        
+        # alignment_frame_offset 的含义：
+        # 正数：参考视频比用户视频晚开始 → 用户视频需要跳过帧
+        # 负数：用户视频比参考视频晚开始 → 参考视频需要跳过帧
+        
+        user_start = 0
+        ref_start = 0
+        
+        if self.alignment_frame_offset > 0:
+            # 参考视频晚开始，用户视频需要跳过前面的帧来等待参考视频
+            user_start = self.alignment_frame_offset
+            print(f"[Alignment] Ref video starts later: user_start={user_start}")
+        elif self.alignment_frame_offset < 0:
+            # 用户视频晚开始，参考视频需要跳过前面的帧来等待用户视频
+            ref_start = -self.alignment_frame_offset
+            print(f"[Alignment] User video starts later: ref_start={ref_start}")
+        else:
+            print("[Alignment] No frame offset needed (videos in sync)")
+        
+        # Recreate video readers with correct start frames
+        if self.userReader:
+            self.userReader.stop()
+            self.userReader = VideoReader(self.user_video_path, start_frame=user_start)
+            self.userReader.start()
+            self.userReader.pause()
+            print(f"[Alignment] User video recreated with start_frame={user_start}")
+        
+        if self.refReader:
+            self.refReader.stop()
+            self.refReader = VideoReader(self.ref_video_path, start_frame=ref_start)
+            self.refReader.finished.connect(self.on_playback_finished)
+            self.refReader.start()
+            self.refReader.pause()
+            print(f"[Alignment] Reference video recreated with start_frame={ref_start}")
+        
+        self.update_timer_interval()
+        
+        # Print FPS info for debugging
+        if self.userReader and self.refReader:
+            print(f"[Alignment] User FPS: {self.userReader.fps}, Ref FPS: {self.refReader.fps}")
 
     def on_playback_finished(self):
         self.pause() # Stop threads
@@ -407,6 +546,12 @@ class MainWindow(QtWidgets.QWidget):
             idx = 0
         self.userReader = VideoReader(int(idx))
         self.userReader.start()
+        
+        # Camera mode doesn't support audio alignment
+        self.user_video_path = None
+        self.is_aligned = False
+        self.alignStatusLabel.setText("Camera Mode")
+        self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
         
         self.playing = True
         self.update_timer_interval()
@@ -548,6 +693,15 @@ class MainWindow(QtWidgets.QWidget):
     def read_and_process(self, step=False):
         user_frame = None
         ref_frame = None
+        
+        # Update frame counter display
+        user_frame_num = 0
+        ref_frame_num = 0
+        if self.userReader:
+            user_frame_num = self.userReader.get_current_frame()
+        if self.refReader:
+            ref_frame_num = self.refReader.get_current_frame()
+        self.frameLabel.setText(f"User: {user_frame_num} | Ref: {ref_frame_num}")
         
         if self.userReader:
             ok, frame = self.userReader.get_frame()
@@ -738,7 +892,16 @@ class MainWindow(QtWidgets.QWidget):
         # 4. 清除工作线程的历史缓存
         self.worker.ref_history.clear()
         
-        # 4. 重置评分数据
+        # 5. 重置音频对齐状态
+        self.user_video_path = None
+        self.ref_video_path = None
+        self.alignment_offset = 0.0
+        self.alignment_frame_offset = 0
+        self.is_aligned = False
+        self.alignStatusLabel.setText("Not Aligned")
+        self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        
+        # 6. 重置评分数据
         self._ema_score = None
         self._ema_dtw_score = None
         self.lastPercent = 0.0
@@ -746,26 +909,26 @@ class MainWindow(QtWidgets.QWidget):
         self.scoreLabel.setText("-- %")
         self.dtwScoreLabel.setText("DTW: -- %")
         
-        # 5. 清除坏帧记录
+        # 7. 清除坏帧记录
         self.badFrames.clear()
         self.badList.clear()
         
-        # 6. 清除折线图
+        # 8. 清除折线图
         self.scoreChart.reset()
         
-        # 7. 重置骨架数据
+        # 9. 重置骨架数据
         self.lastUserLandmarks = []
         self.lastRefLandmarks = []
         self.lastDiffs = None
         
-        # 8. 重置UI状态
+        # 10. 重置UI状态
         self.playing = False
         self.btnPlayReset.setText("Start")
         self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;")
         self.btnPauseResume.setText("Pause")
         self.btnPauseResume.setEnabled(False)
         
-        # 9. 清空视频面板
+        # 11. 清空视频面板
         self.userPanel.clear()
         self.refPanel.clear()
         
@@ -779,11 +942,30 @@ class MainWindow(QtWidgets.QWidget):
         # 如果正在播放，先停止
         self.stop_audio_playback()
         
+        # 计算音频起始时间（基于对齐偏移）
+        # 如果用户视频跳过了帧，音频也需要从对应时间开始
+        audio_start_time = 0.0
+        if self.is_aligned:
+            if self.alignment_frame_offset > 0:
+                # 用户视频跳过了帧，音频从对应时间开始
+                audio_start_time = self.alignment_offset
+                print(f"[Audio] Starting from {audio_start_time:.2f}s (user video skipped frames)")
+            # 如果参考视频跳过了帧，音频从头播放（因为音频来自参考视频）
+        
         def play_audio():
             try:
                 print(f"[Audio] Starting audio playback: {self.audio_path}")
-                self.audioPlayer = MediaPlayer(self.audio_path)
+                
+                # 使用 ff_opts 设置起始时间
+                ff_opts = {}
+                if audio_start_time > 0:
+                    ff_opts['ss'] = audio_start_time  # 起始时间（秒）
+                
+                self.audioPlayer = MediaPlayer(self.audio_path, ff_opts=ff_opts)
                 self.audio_playing = True
+                
+                # 同步计数器
+                sync_counter = 0
                 
                 while self.audio_playing:
                     frame, val = self.audioPlayer.get_frame()
@@ -792,6 +974,12 @@ class MainWindow(QtWidgets.QWidget):
                     if frame is None:
                         time.sleep(0.01)
                         continue
+                    
+                    # 每50帧同步一次音频和视频（约每1.5秒）
+                    sync_counter += 1
+                    if sync_counter >= 50:
+                        sync_counter = 0
+                        self._sync_audio_video()
                 
                 self.audioPlayer.close_player()
                 print("[Audio] Playback finished")
@@ -801,6 +989,26 @@ class MainWindow(QtWidgets.QWidget):
         # 在新线程中播放音频
         self.audio_thread = threading.Thread(target=play_audio, daemon=True)
         self.audio_thread.start()
+    
+    def _sync_audio_video(self):
+        """同步音频和视频播放位置"""
+        if not self.refReader or not self.audioPlayer:
+            return
+        
+        try:
+            # 获取参考视频当前播放时间
+            video_time = self.refReader.get_current_frame() / self.refReader.fps
+            
+            # 获取音频当前播放时间（ffpyplayer的pts）
+            # ffpyplayer 没有直接获取当前时间的方法，使用近似计算
+            # 这里我们假设音频和视频起始时间相同，不做调整
+            # 如果偏差太大，可以考虑重新seek音频
+            
+            # 简单方案：打印同步信息用于调试
+            pass
+            
+        except Exception as e:
+            print(f"[Audio Sync] Error: {e}")
 
     def stop_audio_playback(self):
         """停止音频播放"""

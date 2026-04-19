@@ -167,7 +167,7 @@ class PoseWorker(QtCore.QObject):
         combined_conf = {k: min(u_conf.get(k, 0.0), r_conf.get(k, 0.0)) for k in u_conf}
         
         # 角度评分
-        angle_percent, _ = score_angles(u_angs, r_angs, angle_weights=combined_conf)
+        angle_percent, angle_diffs = score_angles(u_angs, r_angs, angle_weights=combined_conf)
         
         # Procrustes形状评分
         pu, wu = _select_points_with_weights(u_lm)
@@ -175,8 +175,20 @@ class PoseWorker(QtCore.QObject):
         d = _w_procrustes_dist(pu, pr, np.minimum(wu, wr))
         procrustes_percent = _dist_to_score(d, k=self.k_decay, gamma=self.gamma)
         
-        # 融合
-        return 0.4 * procrustes_percent + 0.6 * angle_percent
+        # 融合 - 只使用角度评分
+        final_score = angle_percent
+        
+        # Debug output (every 30 frames)
+        if hasattr(self, '_debug_counter'):
+            self._debug_counter += 1
+        else:
+            self._debug_counter = 0
+        
+        if self._debug_counter % 30 == 0:
+            avg_diff = sum(angle_diffs.values()) / len(angle_diffs) if angle_diffs else 0
+            print(f"[Score] Angle: {angle_percent:.1f}%, Avg angle diff: {avg_diff:.1f}°")
+        
+        return final_score
     
     def _find_best_match_in_history(self, u_lm, u_angs):
         """
