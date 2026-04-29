@@ -64,7 +64,7 @@ class VideoReader(QtCore.QThread):
                     self.new_frame_available = True
             
             self.running = True
-            start_time = time.time()  # 记录开始时间
+            start_time = None  # 延迟设置，在第一次播放时设置
             frame_count = 0  # 已播放帧数（相对于起始帧）
             paused_time = 0.0  # 累计暂停时间
 
@@ -75,7 +75,7 @@ class VideoReader(QtCore.QThread):
                         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self._seek_req)
                         print(f"[VideoReader] Seeked to frame {self._seek_req}")
                         start_time = time.time()  # 重置开始时间
-                        frame_count = self._seek_req - self._start_frame  # 重置帧计数
+                        frame_count = 0  # 重置帧计数为0（相对于起始帧）
                         paused_time = 0.0
                     self._seek_req = -1
 
@@ -86,6 +86,11 @@ class VideoReader(QtCore.QThread):
                     # 累加暂停时间
                     paused_time += time.time() - pause_start
                     continue
+                
+                # 第一次播放时设置开始时间
+                if start_time is None:
+                    start_time = time.time()
+                    print(f"[VideoReader] Starting playback at frame {self._start_frame}")
 
                 # Timing control for file playback - 使用绝对时间控制
                 if not self.is_cam:
@@ -95,15 +100,7 @@ class VideoReader(QtCore.QThread):
                     wait = expected_time - now
                     if wait > 0:
                         time.sleep(wait)
-                    # 如果落后太多，跳过一些帧来追赶
-                    elif wait < -0.5:  # 落后超过0.5秒
-                        skip_frames = int(-wait / frame_interval)
-                        for _ in range(min(skip_frames, 10)):  # 最多跳过10帧
-                            ret, _ = self.cap.read()
-                            if not ret:
-                                break
-                            frame_count += 1
-                        print(f"[VideoReader] Skipped {min(skip_frames, 10)} frames to catch up")
+                    # 移除自动跳帧机制，因为它会导致问题
 
                 ret, frame = self.cap.read()
                 if ret:

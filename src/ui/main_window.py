@@ -111,6 +111,7 @@ class MainWindow(QtWidgets.QWidget):
         self.audio_path = None
         self.audio_thread = None
         self.audio_playing = False
+        self._audio_paused = False  # 音频是否处于暂停状态
 
         self.userPanel = VideoPanel()
         self.refPanel = VideoPanel()
@@ -169,11 +170,11 @@ class MainWindow(QtWidgets.QWidget):
         self.lastDiffs = None
 
         topLayout = QtWidgets.QHBoxLayout()
-        topLayout.addWidget(QtWidgets.QLabel("Real-time:"))
+        topLayout.addWidget(QtWidgets.QLabel("Score:"))
         topLayout.addWidget(self.scoreLabel)
         topLayout.addSpacing(20)
-        topLayout.addWidget(QtWidgets.QLabel("DTW:"))
-        topLayout.addWidget(self.dtwScoreLabel)
+        topLayout.addWidget(self.dtwScoreLabel)  # DTW标签默认隐藏，根据模式显示
+        self.dtwScoreLabel.hide()  # 默认隐藏
         topLayout.addSpacing(20)
         topLayout.addWidget(self.alignStatusLabel)
         topLayout.addSpacing(10)
@@ -182,10 +183,10 @@ class MainWindow(QtWidgets.QWidget):
         topLayout.addWidget(self.hintLabel)
         topLayout.addStretch(1)
 
-        stageLayout = QtWidgets.QHBoxLayout()
-        stageLayout.setSpacing(20)
-        stageLayout.addWidget(self.userPanel, 1)
-        stageLayout.addWidget(self.refPanel, 1)
+        self.stageLayout = QtWidgets.QHBoxLayout()
+        self.stageLayout.setSpacing(20)
+        self.stageLayout.addWidget(self.userPanel, 1)
+        self.stageLayout.addWidget(self.refPanel, 1)
         
         self._countdown_val = 0
         self.countdown_timer = QtCore.QTimer(self)
@@ -260,7 +261,7 @@ class MainWindow(QtWidgets.QWidget):
         # 2. Video Stage - 60% of space, try to keep 16:9
         # To enforce ratio, we might need to be careful.
         # But simple stretch factor is easiest.
-        layout.addLayout(stageLayout, 6) 
+        layout.addLayout(self.stageLayout, 6) 
         
         # 3. Controls - Fixed height
         layout.addLayout(ctrlLayout)
@@ -345,6 +346,10 @@ class MainWindow(QtWidgets.QWidget):
         self.useCam = False
         if self.userReader:
             self.userReader.stop()
+        
+        # 恢复视频面板大小：等比例
+        self._set_panel_ratio(1, 1)
+        
         self.userReader = VideoReader(path)
         self.userReader.start()
         # Pause initially so it doesn't auto-play
@@ -399,6 +404,30 @@ class MainWindow(QtWidgets.QWidget):
         self.alignStatusLabel.setText("Aligning...")
         self.alignStatusLabel.setStyleSheet("color: #FBBF24; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
         
+        # 禁用开始按钮
+        self.btnPlayReset.setEnabled(False)
+        
+        # 显示进度对话框
+        self.alignmentProgressDialog = QtWidgets.QProgressDialog(
+            "Calculating audio alignment, please wait...",
+            None,  # 不显示取消按钮
+            0, 0,  # 不确定的进度
+            self
+        )
+        self.alignmentProgressDialog.setWindowTitle("Audio Alignment")
+        self.alignmentProgressDialog.setWindowModality(QtCore.Qt.WindowModal)
+        self.alignmentProgressDialog.setMinimumDuration(0)  # 立即显示
+        self.alignmentProgressDialog.setCancelButton(None)  # 禁止取消
+        self.alignmentProgressDialog.setStyleSheet("""
+            QProgressDialog {
+                background-color: #1a1a2e;
+            }
+            QProgressDialog QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+        """)
+        
         # Run alignment in background thread
         def do_alignment():
             try:
@@ -426,6 +455,14 @@ class MainWindow(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(float, int)
     def on_alignment_finished(self, time_offset, frame_offset):
+        # 关闭进度对话框
+        if hasattr(self, 'alignmentProgressDialog') and self.alignmentProgressDialog:
+            self.alignmentProgressDialog.close()
+            self.alignmentProgressDialog = None
+        
+        # 启用开始按钮
+        self.btnPlayReset.setEnabled(True)
+        
         self.alignment_offset = time_offset
         self.alignment_frame_offset = frame_offset
         self.is_aligned = True
@@ -434,19 +471,87 @@ class MainWindow(QtWidgets.QWidget):
         if abs(time_offset) < 0.1:
             self.alignStatusLabel.setText("Aligned: In Sync")
             self.alignStatusLabel.setStyleSheet("color: #10B981; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+            msg = "Videos are already in sync!"
         else:
             direction = "User ahead" if time_offset < 0 else "User behind"
             self.alignStatusLabel.setText(f"Aligned: {direction} {abs(time_offset):.1f}s")
             self.alignStatusLabel.setStyleSheet("color: #60A5FA; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+            msg = f"Alignment complete!\n\nTime offset: {abs(time_offset):.2f}s\nFrame offset: {abs(frame_offset)} frames\n\n{'User video starts earlier' if time_offset < 0 else 'User video starts later'}"
+        
+        # 显示美观的完成提示
+        msgBox = QtWidgets.QMessageBox(self)
+        msgBox.setWindowTitle("Audio Alignment Complete")
+        msgBox.setText("✓ Audio Alignment Successful")
+        msgBox.setInformativeText(msg)
+        msgBox.setIcon(QtWidgets.QMessageBox.Information)
+        msgBox.setStyleSheet("""
+            QMessageBox {
+                background-color: #1a1a2e;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                border: none;
+                padding: 8px 24px;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+        """)
+        msgBox.exec()
         
         # Apply alignment to video readers
         self.apply_alignment()
     
     @QtCore.pyqtSlot()
     def on_alignment_failed(self):
+        # 关闭进度对话框
+        if hasattr(self, 'alignmentProgressDialog') and self.alignmentProgressDialog:
+            self.alignmentProgressDialog.close()
+            self.alignmentProgressDialog = None
+        
+        # 启用开始按钮
+        self.btnPlayReset.setEnabled(True)
+        
         self.alignStatusLabel.setText("Alignment Failed")
         self.alignStatusLabel.setStyleSheet("color: #EF4444; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
         self.is_aligned = False
+        
+        # 显示美观的失败提示
+        msgBox = QtWidgets.QMessageBox(self)
+        msgBox.setWindowTitle("Audio Alignment Failed")
+        msgBox.setText("✗ Alignment Failed")
+        msgBox.setInformativeText("Could not align videos automatically.\n\nPlease check if both videos have audio tracks.\nYou can still play videos without alignment.")
+        msgBox.setIcon(QtWidgets.QMessageBox.Warning)
+        msgBox.setStyleSheet("""
+            QMessageBox {
+                background-color: #1a1a2e;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #EF4444;
+                color: white;
+                border: none;
+                padding: 8px 24px;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #DC2626;
+            }
+        """)
+        msgBox.exec()
 
     def apply_alignment(self):
         if not self.is_aligned:
@@ -496,9 +601,13 @@ class MainWindow(QtWidgets.QWidget):
             print(f"[Alignment] User FPS: {self.userReader.fps}, Ref FPS: {self.refReader.fps}")
 
     def on_playback_finished(self):
-        self.pause() # Stop threads
+        self.playing = False
+        self.countdown_timer.stop()
         
-        # 停止音频
+        if self.userReader: self.userReader.pause()
+        if self.refReader: self.refReader.pause()
+        
+        # 停止音频（完全销毁，不是暂停）
         self.stop_audio_playback()
         
         # Calculate final score
@@ -553,6 +662,12 @@ class MainWindow(QtWidgets.QWidget):
         self.alignStatusLabel.setText("Camera Mode")
         self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
         
+        # 调整视频面板大小：摄像头模式时用户面板缩小，参考面板变大
+        self._set_panel_ratio(1, 2)  # 用户:参考 = 1:2
+        
+        # 显示DTW评分标签
+        self.dtwScoreLabel.show()
+        
         self.playing = True
         self.update_timer_interval()
         # Ensure chart is ready?
@@ -562,8 +677,25 @@ class MainWindow(QtWidgets.QWidget):
         if self.userReader:
             self.userReader.stop()
         self.userReader = None
+        
+        # 恢复视频面板大小：等比例
+        self._set_panel_ratio(1, 1)  # 用户:参考 = 1:1
+        
+        # 显示实时评分标签
+        self.dtwScoreLabel.show()
+        
         self.playing = False
         self.update_timer_interval()
+    
+    def _set_panel_ratio(self, user_ratio, ref_ratio):
+        """设置视频面板的大小比例"""
+        # 移除所有widget
+        self.stageLayout.removeWidget(self.userPanel)
+        self.stageLayout.removeWidget(self.refPanel)
+        
+        # 重新添加并设置新的比例
+        self.stageLayout.addWidget(self.userPanel, user_ratio)
+        self.stageLayout.addWidget(self.refPanel, ref_ratio)
 
     def play_reset(self):
         # This button now acts as Start / Stop
@@ -586,7 +718,7 @@ class MainWindow(QtWidgets.QWidget):
                 self.refReader.pause()
                 self.refReader.reset()
             
-            # 重置音频
+            # 停止并重置音频
             self.stop_audio_playback()
             
             # Start countdown
@@ -611,8 +743,8 @@ class MainWindow(QtWidgets.QWidget):
         # Resume threads
         if self.userReader: self.userReader.resume()
         if self.refReader: self.refReader.resume()
-        # 播放音频
-        self.start_audio_playback()
+        # 恢复音频（使用ffpyplayer的暂停功能）
+        self.resume_audio()
 
     def on_countdown_tick(self):
         self._countdown_val -= 1
@@ -635,10 +767,11 @@ class MainWindow(QtWidgets.QWidget):
     def pause(self):
         self.playing = False
         self.countdown_timer.stop()
+        
         if self.userReader: self.userReader.pause()
         if self.refReader: self.refReader.pause()
-        # 暂停音频
-        self.stop_audio_playback()
+        # 暂停音频（使用ffpyplayer的暂停功能）
+        self.pause_audio()
 
     # Removed step()
 
@@ -660,7 +793,6 @@ class MainWindow(QtWidgets.QWidget):
             else:
                 self._ema_score = self._ema_alpha * real_time_percent + (1.0 - self._ema_alpha) * self._ema_score
             self.lastPercent = self._ema_score
-            self.scoreLabel.setText(f"{int(round(self.lastPercent))} %")
             
             # 2. DTW评分EMA平滑
             if self._ema_dtw_score is None:
@@ -668,9 +800,18 @@ class MainWindow(QtWidgets.QWidget):
             else:
                 self._ema_dtw_score = self._ema_alpha * dtw_percent + (1.0 - self._ema_alpha) * self._ema_dtw_score
             self.lastDtwPercent = self._ema_dtw_score
-            self.dtwScoreLabel.setText(f"{int(round(self.lastDtwPercent))} %")
             
-            # 3. 更新双折线图
+            # 3. 根据模式显示不同的评分
+            if self.useCam:
+                # 摄像头模式：显示DTW评分
+                self.scoreLabel.setText(f"{int(round(self.lastDtwPercent))} %")
+                self.dtwScoreLabel.hide()
+            else:
+                # 视频比较模式：只显示实时评分
+                self.scoreLabel.setText(f"{int(round(self.lastPercent))} %")
+                self.dtwScoreLabel.hide()
+            
+            # 4. 更新折线图
             self.scoreChart.add_scores(self.lastPercent, self.lastDtwPercent)
             
             # Timing hint disabled
@@ -935,38 +1076,74 @@ class MainWindow(QtWidgets.QWidget):
         print("[Clear] All cache data cleared. System reset to initial state.")
 
     def start_audio_playback(self):
-        """使用ffpyplayer开始播放音频"""
+        """使用ffpyplayer开始播放音频，音频跟随参考视频"""
         if not FFPYPLAYER_AVAILABLE or not self.audio_path:
+            print(f"[Audio] Cannot start: FFPYPLAYER_AVAILABLE={FFPYPLAYER_AVAILABLE}, audio_path={self.audio_path}")
             return
         
-        # 如果正在播放，先停止
+        # 先停止之前的播放
         self.stop_audio_playback()
         
-        # 计算音频起始时间（基于对齐偏移）
-        # 如果用户视频跳过了帧，音频也需要从对应时间开始
+        # 计算音频起始时间
+        # 音频来自参考视频，所以起始时间取决于参考视频的起始帧
         audio_start_time = 0.0
-        if self.is_aligned:
-            if self.alignment_frame_offset > 0:
-                # 用户视频跳过了帧，音频从对应时间开始
-                audio_start_time = self.alignment_offset
-                print(f"[Audio] Starting from {audio_start_time:.2f}s (user video skipped frames)")
-            # 如果参考视频跳过了帧，音频从头播放（因为音频来自参考视频）
+        
+        # 获取参考视频的起始帧对应的时间
+        if self.refReader:
+            print(f"[Audio] Ref video _start_frame={self.refReader._start_frame}, fps={self.refReader.fps}")
+            if self.refReader._start_frame > 0:
+                audio_start_time = self.refReader._start_frame / self.refReader.fps
+                print(f"[Audio] Calculated audio start time: {audio_start_time:.2f}s")
+        else:
+            print("[Audio] No refReader available")
+        
+        if audio_start_time > 0.1:
+            print(f"[Audio] Starting from {audio_start_time:.2f}s")
+        else:
+            audio_start_time = 0.0
+            print(f"[Audio] Starting from beginning")
         
         def play_audio():
             try:
-                print(f"[Audio] Starting audio playback: {self.audio_path}")
-                
-                # 使用 ff_opts 设置起始时间
+                # 创建播放器
                 ff_opts = {}
-                if audio_start_time > 0:
-                    ff_opts['ss'] = audio_start_time  # 起始时间（秒）
-                
                 self.audioPlayer = MediaPlayer(self.audio_path, ff_opts=ff_opts)
                 self.audio_playing = True
+                self._audio_paused = False
+                print(f"[Audio] Playing: {self.audio_path}")
                 
-                # 同步计数器
-                sync_counter = 0
+                # 如果需要从指定位置开始，快速跳帧
+                if audio_start_time > 0:
+                    print(f"[Audio] Skipping to {audio_start_time:.2f}s...")
+                    skip_start = time.time()
+                    frames_skipped = 0
+                    while self.audio_playing:
+                        frame, val = self.audioPlayer.get_frame()
+                        if val == 'eof':
+                            print("[Audio] Reached EOF while skipping")
+                            break
+                        if frame is None:
+                            time.sleep(0.001)
+                            continue
+                        
+                        frames_skipped += 1
+                        # frame 格式通常是 (pts, audio_data, ...)
+                        # pts 是播放时间戳
+                        if hasattr(frame, '__len__') and len(frame) >= 1:
+                            try:
+                                pts = frame[0]
+                                if pts >= audio_start_time:
+                                    print(f"[Audio] Reached target position at {pts:.2f}s (skipped {frames_skipped} frames in {time.time()-skip_start:.2f}s)")
+                                    break
+                            except:
+                                pass
+                        
+                        # 安全检查：如果跳帧时间过长，也停止
+                        if time.time() - skip_start > 5.0:
+                            print(f"[Audio] Skip timeout after {frames_skipped} frames")
+                            break
                 
+                # 正常播放循环
                 while self.audio_playing:
                     frame, val = self.audioPlayer.get_frame()
                     if val == 'eof':
@@ -974,54 +1151,62 @@ class MainWindow(QtWidgets.QWidget):
                     if frame is None:
                         time.sleep(0.01)
                         continue
-                    
-                    # 每50帧同步一次音频和视频（约每1.5秒）
-                    sync_counter += 1
-                    if sync_counter >= 50:
-                        sync_counter = 0
-                        self._sync_audio_video()
                 
-                self.audioPlayer.close_player()
+                if self.audioPlayer:
+                    self.audioPlayer.close_player()
+                    self.audioPlayer = None
                 print("[Audio] Playback finished")
             except Exception as e:
+                import traceback
                 print(f"[Audio] Playback error: {e}")
+                traceback.print_exc()
         
-        # 在新线程中播放音频
         self.audio_thread = threading.Thread(target=play_audio, daemon=True)
         self.audio_thread.start()
+        print(f"[Audio] Thread started")
+    
+    def pause_audio(self):
+        """暂停音频播放（不销毁播放器）"""
+        if self.audioPlayer and not self._audio_paused:
+            try:
+                self.audioPlayer.set_pause(True)
+                self._audio_paused = True
+                print("[Audio] Paused")
+            except Exception as e:
+                print(f"[Audio] Pause error: {e}")
+    
+    def resume_audio(self):
+        """恢复音频播放（不重新创建播放器）"""
+        if self.audioPlayer and self._audio_paused:
+            try:
+                self.audioPlayer.set_pause(False)
+                self._audio_paused = False
+                print("[Audio] Resumed")
+            except Exception as e:
+                print(f"[Audio] Resume error: {e}")
     
     def _sync_audio_video(self):
-        """同步音频和视频播放位置"""
-        if not self.refReader or not self.audioPlayer:
-            return
-        
-        try:
-            # 获取参考视频当前播放时间
-            video_time = self.refReader.get_current_frame() / self.refReader.fps
-            
-            # 获取音频当前播放时间（ffpyplayer的pts）
-            # ffpyplayer 没有直接获取当前时间的方法，使用近似计算
-            # 这里我们假设音频和视频起始时间相同，不做调整
-            # 如果偏差太大，可以考虑重新seek音频
-            
-            # 简单方案：打印同步信息用于调试
-            pass
-            
-        except Exception as e:
-            print(f"[Audio Sync] Error: {e}")
+        """同步音频和视频播放位置 - 已禁用"""
+        pass
 
     def stop_audio_playback(self):
-        """停止音频播放"""
+        """停止音频播放（销毁播放器）"""
         self.audio_playing = False
+        self._audio_paused = False
+        
+        # 关闭音频播放器
         if self.audioPlayer:
             try:
                 self.audioPlayer.close_player()
-                self.audioPlayer = None
-                print("[Audio] Stopped")
             except:
                 pass
+            self.audioPlayer = None
+        
+        # 等待音频线程结束
         if self.audio_thread and self.audio_thread.is_alive():
-            self.audio_thread.join(timeout=1.0)
+            self.audio_thread.join(timeout=0.5)
+        
+        print("[Audio] Stopped")
 
     def on_audio_error(self, error):
         """音频错误处理"""

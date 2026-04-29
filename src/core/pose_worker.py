@@ -27,7 +27,7 @@ class PoseWorker(QtCore.QObject):
         
         # 历史缓冲区 - 只存储参考视频的历史，用于DTW查找
         self.ref_history = [] # List of (landmarks, angles)
-        self.HISTORY_LEN = 60 # 存储约2秒的参考帧
+        self.HISTORY_LEN = 15 # 存储约0.5秒的参考帧 (30fps * 0.5s)
 
     def start(self):
         from mediapipe.tasks import python as mp_python
