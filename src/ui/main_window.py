@@ -27,57 +27,88 @@ class MainWindow(QtWidgets.QWidget):
         self.setWindowTitle("Dance Pose Scoring System")
         self.resize(1400, 900)
         
-        # Apply Dark Theme
+        # Apply Modern Dark Theme
         self.setStyleSheet("""
             QWidget {
-                background-color: #1E1E1E;
+                background-color: #1a1a2e;
                 color: #E0E0E0;
                 font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-                font-size: 16px; /* Base font size increased */
+                font-size: 16px;
             }
             QPushButton {
-                background-color: #333333;
-                border: 1px solid #555555;
-                border-radius: 8px; /* Slightly rounder */
-                padding: 12px 24px; /* Much larger padding */
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a5c, stop:1 #2a2a45);
+                border: 1px solid #4a4a7a;
+                border-radius: 10px;
+                padding: 12px 28px;
                 color: #FFFFFF;
-                font-weight: bold;
+                font-weight: 600;
                 font-size: 16px;
-                min-height: 40px; /* Ensure button height */
+                min-height: 44px;
+                min-width: 100px;
             }
             QPushButton:hover {
-                background-color: #444444;
-                border-color: #00C6FF;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a7a, stop:1 #3a3a65);
+                border-color: #00d4ff;
             }
             QPushButton:pressed {
-                background-color: #222222;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2a2a45, stop:1 #1a1a35);
+                border-color: #6a6aaa;
             }
             QComboBox {
-                background-color: #333333;
-                border: 1px solid #555555;
-                border-radius: 8px;
-                padding: 10px;
+                background-color: #252545;
+                border: 1px solid #4a4a7a;
+                border-radius: 10px;
+                padding: 10px 14px;
                 font-size: 16px;
-                min-height: 40px;
+                min-height: 44px;
+                color: #FFFFFF;
+            }
+            QComboBox::drop-down {
+                border-radius: 0 10px 10px 0;
+                background-color: #3a3a65;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #252545;
+                border: 1px solid #4a4a7a;
+                border-radius: 10px;
+                selection-background-color: #3a3a65;
             }
             QLabel {
                 color: #E0E0E0;
                 font-size: 16px;
             }
             QListWidget {
-                background-color: #252525;
-                border: 1px solid #333;
-                border-radius: 8px;
-                padding: 10px;
+                background-color: #1e1e3e;
+                border: 1px solid #3a3a65;
+                border-radius: 12px;
+                padding: 12px;
                 font-size: 14px;
             }
             QListWidget::item {
-                border-radius: 6px;
-                padding: 5px;
+                border-radius: 8px;
+                padding: 8px;
+                margin: 4px 0;
+                background-color: #252545;
             }
             QListWidget::item:selected {
-                background-color: #3A3A3A;
-                border: 1px solid #00C6FF;
+                background-color: #3a3a65;
+                border: 1px solid #00d4ff;
+            }
+            QProgressDialog {
+                background-color: #1a1a2e;
+                border-radius: 12px;
+            }
+            QProgressDialog QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QMessageBox {
+                background-color: #1a1a2e;
+                border-radius: 12px;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
+                font-size: 14px;
             }
         """)
 
@@ -119,38 +150,74 @@ class MainWindow(QtWidgets.QWidget):
         # 实时评分标签
         self.scoreLabel = QtWidgets.QLabel("-- %")
         f = self.scoreLabel.font()
-        f.setPointSize(18)
+        f.setPointSize(24)
         f.setBold(True)
         self.scoreLabel.setFont(f)
         self.scoreLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.scoreLabel.setStyleSheet("color: #10B981; background-color: #000000; border-radius: 20px; padding: 20px; font-size: 18pt;")
+        self.scoreLabel.setStyleSheet("""
+            color: #10B981; 
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #16213e, stop:1 #0f3460);
+            border: 2px solid #10B981;
+            border-radius: 25px; 
+            padding: 16px 32px; 
+            font-size: 24pt;
+            min-width: 140px;
+        """)
         
         # DTW对齐评分标签
         self.dtwScoreLabel = QtWidgets.QLabel("DTW: -- %")
         f_dtw = self.dtwScoreLabel.font()
-        f_dtw.setPointSize(18)
+        f_dtw.setPointSize(20)
         f_dtw.setBold(True)
         self.dtwScoreLabel.setFont(f_dtw)
         self.dtwScoreLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.dtwScoreLabel.setStyleSheet("color: #60A5FA; background-color: #000000; border-radius: 20px; padding: 20px; font-size: 18pt;")
+        self.dtwScoreLabel.setStyleSheet("""
+            color: #60A5FA; 
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1e3a5f, stop:1 #16213e);
+            border: 2px solid #60A5FA;
+            border-radius: 20px; 
+            padding: 12px 24px; 
+            font-size: 20pt;
+        """)
 
         self.hintLabel = QtWidgets.QLabel("")
         f2 = self.hintLabel.font()
-        f2.setPointSize(24)
+        f2.setPointSize(22)
         f2.setBold(True)
         self.hintLabel.setFont(f2)
         self.hintLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.hintLabel.setStyleSheet("color: #FBBF24; background-color: #222; border-radius: 15px; padding: 10px; font-size: 24pt;")
+        self.hintLabel.setStyleSheet("""
+            color: #FBBF24; 
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3d2914, stop:1 #2d1f0f);
+            border: 2px solid #FBBF24;
+            border-radius: 18px; 
+            padding: 12px 30px; 
+            font-size: 22pt;
+        """)
 
         # Alignment status label
         self.alignStatusLabel = QtWidgets.QLabel("Not Aligned")
         self.alignStatusLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        self.alignStatusLabel.setStyleSheet("""
+            color: #888888; 
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2a2a4a, stop:1 #1e1e3e);
+            border: 1px solid #4a4a7a;
+            border-radius: 12px; 
+            padding: 8px 20px; 
+            font-size: 13pt;
+        """)
 
         # Frame counter label for debugging alignment
         self.frameLabel = QtWidgets.QLabel("User: 0 | Ref: 0")
         self.frameLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.frameLabel.setStyleSheet("color: #888888; background-color: #222; border-radius: 5px; padding: 3px; font-size: 10pt;")
+        self.frameLabel.setStyleSheet("""
+            color: #a0a0c0; 
+            background: #1e1e3e;
+            border: 1px solid #3a3a65;
+            border-radius: 8px; 
+            padding: 6px 16px; 
+            font-size: 11pt;
+        """)
 
         self._miss_count = 0
         self._ema_score = None
@@ -210,10 +277,11 @@ class MainWindow(QtWidgets.QWidget):
         # Group 2: Playback Control (Bottom row, centered, larger)
 
         ctrlLayout = QtWidgets.QVBoxLayout()
-        ctrlLayout.setSpacing(15)
+        ctrlLayout.setSpacing(18)
 
         # Source Controls
         sourceLayout = QtWidgets.QHBoxLayout()
+        sourceLayout.setSpacing(12)
         sourceLayout.addWidget(self.btnLoadUser)
         sourceLayout.addWidget(self.btnLoadRef)
         sourceLayout.addWidget(self.camCombo)
@@ -222,14 +290,36 @@ class MainWindow(QtWidgets.QWidget):
         
         # Playback Controls - Make them BIG
         playLayout = QtWidgets.QHBoxLayout()
+        playLayout.setSpacing(15)
         playLayout.addStretch(1)
         
         # Style Play/Pause buttons to be prominent
-        self.btnPlayReset.setMinimumWidth(120)
-        self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
+        self.btnPlayReset.setMinimumWidth(140)
+        self.btnPlayReset.setMinimumHeight(50)
+        self.btnPlayReset.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+            border: 2px solid #10B981;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            padding: 12px 30px;
+        """) # Green
         
-        self.btnPauseResume.setMinimumWidth(120)
-        self.btnPauseResume.setStyleSheet("background-color: #F59E0B; font-size: 18px;") # Orange
+        self.btnPauseResume.setMinimumWidth(140)
+        self.btnPauseResume.setMinimumHeight(50)
+        self.btnPauseResume.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F59E0B, stop:1 #D97706);
+            border: 2px solid #F59E0B;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            padding: 12px 30px;
+        """) # Orange
+        
+        self.btnExtract.setMinimumHeight(50)
+        self.btnClear.setMinimumHeight(50)
         
         playLayout.addWidget(self.btnPlayReset)
         playLayout.addWidget(self.btnPauseResume)
@@ -397,12 +487,26 @@ class MainWindow(QtWidgets.QWidget):
         
         if not LIBROSA_AVAILABLE or not MOVIEPY_AVAILABLE:
             self.alignStatusLabel.setText("Alignment Unavailable")
-            self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+            self.alignStatusLabel.setStyleSheet("""
+                color: #888888; 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2a2a4a, stop:1 #1e1e3e);
+                border: 1px solid #4a4a7a;
+                border-radius: 12px; 
+                padding: 8px 20px; 
+                font-size: 13pt;
+            """)
             print("[Alignment] Required libraries not available")
             return
         
         self.alignStatusLabel.setText("Aligning...")
-        self.alignStatusLabel.setStyleSheet("color: #FBBF24; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        self.alignStatusLabel.setStyleSheet("""
+            color: #FBBF24; 
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3d2914, stop:1 #2d1f0f);
+            border: 1px solid #FBBF24;
+            border-radius: 12px; 
+            padding: 8px 20px; 
+            font-size: 13pt;
+        """)
         
         # 禁用开始按钮
         self.btnPlayReset.setEnabled(False)
@@ -470,12 +574,26 @@ class MainWindow(QtWidgets.QWidget):
         # Update UI
         if abs(time_offset) < 0.1:
             self.alignStatusLabel.setText("Aligned: In Sync")
-            self.alignStatusLabel.setStyleSheet("color: #10B981; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+            self.alignStatusLabel.setStyleSheet("""
+                color: #10B981; 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1a3a2e, stop:1 #0f2a1f);
+                border: 1px solid #10B981;
+                border-radius: 12px; 
+                padding: 8px 20px; 
+                font-size: 13pt;
+            """)
             msg = "Videos are already in sync!"
         else:
             direction = "User ahead" if time_offset < 0 else "User behind"
             self.alignStatusLabel.setText(f"Aligned: {direction} {abs(time_offset):.1f}s")
-            self.alignStatusLabel.setStyleSheet("color: #60A5FA; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+            self.alignStatusLabel.setStyleSheet("""
+                color: #60A5FA; 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e3a5f, stop:1 #16213e);
+                border: 1px solid #60A5FA;
+                border-radius: 12px; 
+                padding: 8px 20px; 
+                font-size: 13pt;
+            """)
             msg = f"Alignment complete!\n\nTime offset: {abs(time_offset):.2f}s\nFrame offset: {abs(frame_offset)} frames\n\n{'User video starts earlier' if time_offset < 0 else 'User video starts later'}"
         
         # 显示美观的完成提示
@@ -521,7 +639,14 @@ class MainWindow(QtWidgets.QWidget):
         self.btnPlayReset.setEnabled(True)
         
         self.alignStatusLabel.setText("Alignment Failed")
-        self.alignStatusLabel.setStyleSheet("color: #EF4444; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        self.alignStatusLabel.setStyleSheet("""
+            color: #EF4444; 
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a1a1a, stop:1 #2a0f0f);
+            border: 1px solid #EF4444;
+            border-radius: 12px; 
+            padding: 8px 20px; 
+            font-size: 13pt;
+        """)
         self.is_aligned = False
         
         # 显示美观的失败提示
@@ -632,7 +757,15 @@ class MainWindow(QtWidgets.QWidget):
         
         # Reset UI state to "Ready to Start"
         self.btnPlayReset.setText("Start")
-        self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
+        self.btnPlayReset.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+            border: 2px solid #10B981;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            padding: 12px 30px;
+        """) # Green
         self.btnPauseResume.setText("Pause")
         self.btnPauseResume.setEnabled(False) # Disable pause when stopped
 
@@ -644,7 +777,14 @@ class MainWindow(QtWidgets.QWidget):
         else:
             self.start_cam()
             self.btnCamToggle.setText("Stop Camera")
-            self.btnCamToggle.setStyleSheet("background-color: #EF4444; border-color: #EF4444;") # Red
+            self.btnCamToggle.setStyleSheet("""
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #EF4444, stop:1 #DC2626);
+                border: 2px solid #EF4444;
+                border-radius: 10px;
+                color: white;
+                font-weight: 600;
+                font-size: 16px;
+            """) # Red
 
     def start_cam(self):
         self.useCam = True
@@ -660,7 +800,14 @@ class MainWindow(QtWidgets.QWidget):
         self.user_video_path = None
         self.is_aligned = False
         self.alignStatusLabel.setText("Camera Mode")
-        self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        self.alignStatusLabel.setStyleSheet("""
+            color: #888888; 
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2a2a4a, stop:1 #1e1e3e);
+            border: 1px solid #4a4a7a;
+            border-radius: 12px; 
+            padding: 8px 20px; 
+            font-size: 13pt;
+        """)
         
         # 调整视频面板大小：摄像头模式时用户面板缩小，参考面板变大
         self._set_panel_ratio(1, 2)  # 用户:参考 = 1:2
@@ -703,12 +850,28 @@ class MainWindow(QtWidgets.QWidget):
             # User clicked "Stop"
             self.on_playback_finished() # Show score and stop
             self.btnPlayReset.setText("Start")
-            self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;") # Green
+            self.btnPlayReset.setStyleSheet("""
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+                border: 2px solid #10B981;
+                border-radius: 12px;
+                color: white;
+                font-weight: bold;
+                font-size: 18px;
+                padding: 12px 30px;
+            """) # Green
         else:
             # User clicked "Start" -> Reset and Start
             self.scoreChart.reset()
             self.btnPlayReset.setText("Stop")
-            self.btnPlayReset.setStyleSheet("background-color: #EF4444; font-size: 18px;") # Red
+            self.btnPlayReset.setStyleSheet("""
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #EF4444, stop:1 #DC2626);
+                border: 2px solid #EF4444;
+                border-radius: 12px;
+                color: white;
+                font-weight: bold;
+                font-size: 18px;
+                padding: 12px 30px;
+            """) # Red
             
             # Reset readers
             if self.userReader: 
@@ -1040,7 +1203,14 @@ class MainWindow(QtWidgets.QWidget):
         self.alignment_frame_offset = 0
         self.is_aligned = False
         self.alignStatusLabel.setText("Not Aligned")
-        self.alignStatusLabel.setStyleSheet("color: #888888; background-color: #333; border-radius: 10px; padding: 5px; font-size: 12pt;")
+        self.alignStatusLabel.setStyleSheet("""
+            color: #888888; 
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2a2a4a, stop:1 #1e1e3e);
+            border: 1px solid #4a4a7a;
+            border-radius: 12px; 
+            padding: 8px 20px; 
+            font-size: 13pt;
+        """)
         
         # 6. 重置评分数据
         self._ema_score = None
@@ -1065,7 +1235,15 @@ class MainWindow(QtWidgets.QWidget):
         # 10. 重置UI状态
         self.playing = False
         self.btnPlayReset.setText("Start")
-        self.btnPlayReset.setStyleSheet("background-color: #10B981; font-size: 18px;")
+        self.btnPlayReset.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+            border: 2px solid #10B981;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            padding: 12px 30px;
+        """)
         self.btnPauseResume.setText("Pause")
         self.btnPauseResume.setEnabled(False)
         
