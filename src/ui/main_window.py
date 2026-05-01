@@ -335,6 +335,7 @@ class MainWindow(QtWidgets.QWidget):
         self.badList.setIconSize(QtCore.QSize(200, 112)) # Larger thumbnails
         self.badList.setResizeMode(QtWidgets.QListWidget.Adjust)
         self.badList.setUniformItemSizes(True)
+        self.badList.itemClicked.connect(self.on_bad_frame_clicked)
         # Remove fixed max height, let layout manage
         # self.badList.setMaximumHeight(160) 
 
@@ -815,9 +816,9 @@ class MainWindow(QtWidgets.QWidget):
         # 显示DTW评分标签
         self.dtwScoreLabel.show()
         
-        self.playing = True
+        # 注意：不要设置 self.playing = True，等待用户点击开始按钮
+        self.playing = False
         self.update_timer_interval()
-        # Ensure chart is ready?
         
     def stop_cam(self):
         self.useCam = False
@@ -1174,7 +1175,81 @@ class MainWindow(QtWidgets.QWidget):
         for score, tstr, qimg in items:
             icon = QtGui.QIcon(QtGui.QPixmap.fromImage(qimg).scaled(160, 90, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
             item = QtWidgets.QListWidgetItem(icon, f"{int(round(score))}% @ {tstr}")
+            # 存储原始图像数据
+            item.setData(QtCore.Qt.UserRole, qimg)
+            item.setData(QtCore.Qt.UserRole + 1, score)
+            item.setData(QtCore.Qt.UserRole + 2, tstr)
             self.badList.addItem(item)
+    
+    def on_bad_frame_clicked(self, item):
+        """点击坏帧缩略图时显示大图"""
+        # 获取存储的数据
+        qimg = item.data(QtCore.Qt.UserRole)
+        score = item.data(QtCore.Qt.UserRole + 1)
+        tstr = item.data(QtCore.Qt.UserRole + 2)
+        
+        if qimg is None:
+            return
+        
+        # 创建对话框显示大图
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Bad Frame - Score: {int(round(score))}% @ {tstr}")
+        dialog.setMinimumSize(800, 600)
+        
+        layout = QtWidgets.QVBoxLayout(dialog)
+        
+        # 创建标签显示图片
+        imgLabel = QtWidgets.QLabel()
+        imgLabel.setAlignment(QtCore.Qt.AlignCenter)
+        
+        # 缩放图片以适应窗口，但保持比例
+        pixmap = QtGui.QPixmap.fromImage(qimg)
+        if pixmap.width() > 1200 or pixmap.height() > 800:
+            pixmap = pixmap.scaled(1200, 800, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        
+        imgLabel.setPixmap(pixmap)
+        layout.addWidget(imgLabel)
+        
+        # 添加信息标签
+        infoLabel = QtWidgets.QLabel(f"Score: {int(round(score))}% | Time: {tstr}")
+        infoLabel.setAlignment(QtCore.Qt.AlignCenter)
+        infoLabel.setStyleSheet("font-size: 16px; color: #EF4444; padding: 10px;")
+        layout.addWidget(infoLabel)
+        
+        # 添加关闭按钮
+        closeBtn = QtWidgets.QPushButton("Close")
+        closeBtn.clicked.connect(dialog.close)
+        closeBtn.setStyleSheet("""
+            QPushButton {
+                background-color: #4B5563;
+                color: white;
+                border: none;
+                padding: 10px 30px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #6B7280;
+            }
+        """)
+        
+        btnLayout = QtWidgets.QHBoxLayout()
+        btnLayout.addStretch()
+        btnLayout.addWidget(closeBtn)
+        btnLayout.addStretch()
+        layout.addLayout(btnLayout)
+        
+        # 设置对话框样式
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a2e;
+            }
+            QLabel {
+                color: white;
+            }
+        """)
+        
+        dialog.exec()
 
     def clear_cache(self):
         """清除所有缓存数据，恢复到程序刚启动的状态"""
@@ -1254,74 +1329,55 @@ class MainWindow(QtWidgets.QWidget):
         print("[Clear] All cache data cleared. System reset to initial state.")
 
     def start_audio_playback(self):
-        """使用ffpyplayer开始播放音频，音频跟随参考视频"""
-        if not FFPYPLAYER_AVAILABLE or not self.audio_path:
-            print(f"[Audio] Cannot start: FFPYPLAYER_AVAILABLE={FFPYPLAYER_AVAILABLE}, audio_path={self.audio_path}")
+        """使用ffpyplayer开始播放音频
+        
+        新逻辑：播放不需要跳过帧的视频的音频，保证音画同步
+        - 如果用户视频跳过帧（用户视频晚开始），播放参考视频的音频
+        - 如果参考视频跳过帧（参考视频晚开始），播放用户视频的音频
+        """
+        if not FFPYPLAYER_AVAILABLE:
+            print("[Audio] ffpyplayer not available")
             return
         
         # 先停止之前的播放
         self.stop_audio_playback()
         
-        # 计算音频起始时间
-        # 音频来自参考视频，所以起始时间取决于参考视频的起始帧
-        audio_start_time = 0.0
+        # 决定播放哪个视频的音频
+        audio_source = None
         
-        # 获取参考视频的起始帧对应的时间
-        if self.refReader:
-            print(f"[Audio] Ref video _start_frame={self.refReader._start_frame}, fps={self.refReader.fps}")
-            if self.refReader._start_frame > 0:
-                audio_start_time = self.refReader._start_frame / self.refReader.fps
-                print(f"[Audio] Calculated audio start time: {audio_start_time:.2f}s")
+        if self.is_aligned:
+            if self.alignment_frame_offset > 0:
+                # 用户视频跳过帧，参考视频从头播放 → 播放参考视频的音频
+                audio_source = self.ref_video_path
+                print(f"[Audio] User video skips frames, playing ref video audio")
+            elif self.alignment_frame_offset < 0:
+                # 参考视频跳过帧，用户视频从头播放 → 播放用户视频的音频
+                audio_source = self.user_video_path
+                print(f"[Audio] Ref video skips frames, playing user video audio")
+            else:
+                # 两个视频同步，播放参考视频的音频
+                audio_source = self.ref_video_path
+                print(f"[Audio] Videos in sync, playing ref video audio")
         else:
-            print("[Audio] No refReader available")
+            # 未对齐，播放参考视频的音频
+            audio_source = self.ref_video_path
+            print(f"[Audio] Not aligned, playing ref video audio")
         
-        if audio_start_time > 0.1:
-            print(f"[Audio] Starting from {audio_start_time:.2f}s")
-        else:
-            audio_start_time = 0.0
-            print(f"[Audio] Starting from beginning")
+        if not audio_source:
+            print("[Audio] No audio source available")
+            return
+        
+        print(f"[Audio] Playing audio from: {audio_source}")
         
         def play_audio():
             try:
-                # 创建播放器
+                # 创建播放器，从头开始播放
                 ff_opts = {}
-                self.audioPlayer = MediaPlayer(self.audio_path, ff_opts=ff_opts)
+                self.audioPlayer = MediaPlayer(audio_source, ff_opts=ff_opts)
                 self.audio_playing = True
                 self._audio_paused = False
-                print(f"[Audio] Playing: {self.audio_path}")
+                print(f"[Audio] Started playback")
                 
-                # 如果需要从指定位置开始，快速跳帧
-                if audio_start_time > 0:
-                    print(f"[Audio] Skipping to {audio_start_time:.2f}s...")
-                    skip_start = time.time()
-                    frames_skipped = 0
-                    while self.audio_playing:
-                        frame, val = self.audioPlayer.get_frame()
-                        if val == 'eof':
-                            print("[Audio] Reached EOF while skipping")
-                            break
-                        if frame is None:
-                            time.sleep(0.001)
-                            continue
-                        
-                        frames_skipped += 1
-                        # frame 格式通常是 (pts, audio_data, ...)
-                        # pts 是播放时间戳
-                        if hasattr(frame, '__len__') and len(frame) >= 1:
-                            try:
-                                pts = frame[0]
-                                if pts >= audio_start_time:
-                                    print(f"[Audio] Reached target position at {pts:.2f}s (skipped {frames_skipped} frames in {time.time()-skip_start:.2f}s)")
-                                    break
-                            except:
-                                pass
-                        
-                        # 安全检查：如果跳帧时间过长，也停止
-                        if time.time() - skip_start > 5.0:
-                            print(f"[Audio] Skip timeout after {frames_skipped} frames")
-                            break
-                
-                # 正常播放循环
                 while self.audio_playing:
                     frame, val = self.audioPlayer.get_frame()
                     if val == 'eof':
