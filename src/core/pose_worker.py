@@ -72,6 +72,7 @@ class PoseWorker(QtCore.QObject):
                     real_time_percent, dtw_percent, diffs = self.compute_dual_scores(u_lms, r_lms)
                     timing_hint = self.check_timing(u_lms)
 
+                self.set_analysis_data(u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint)
                 self.results_ready.emit(u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint)
             except Empty:
                 continue
@@ -244,3 +245,27 @@ class PoseWorker(QtCore.QObject):
         节奏分析功能已禁用
         """
         return ""
+
+    def get_analysis_data(self):
+        """
+        获取当前分析数据，供AI教练使用
+        Returns:
+            dict: 包含当前分析数据的字典，如果无可用数据返回None
+        """
+        if not hasattr(self, '_last_analysis_data'):
+            return None
+
+        return self._last_analysis_data
+
+    def set_analysis_data(self, u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint):
+        """
+        设置当前分析数据
+        """
+        self._last_analysis_data = {
+            'user_landmarks': u_lms,
+            'ref_landmarks': r_lms,
+            'diffs': diffs,
+            'real_time_percent': real_time_percent,
+            'dtw_percent': dtw_percent,
+            'timing_hint': timing_hint
+        }
