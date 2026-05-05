@@ -190,21 +190,6 @@ class MainWindow(QtWidgets.QWidget):
             font-size: 20pt;
         """)
 
-        self.hintLabel = QtWidgets.QLabel("")
-        f2 = self.hintLabel.font()
-        f2.setPointSize(22)
-        f2.setBold(True)
-        self.hintLabel.setFont(f2)
-        self.hintLabel.setAlignment(QtCore.Qt.AlignCenter)
-        self.hintLabel.setStyleSheet("""
-            color: #FBBF24; 
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3d2914, stop:1 #2d1f0f);
-            border: 2px solid #FBBF24;
-            border-radius: 18px; 
-            padding: 12px 30px; 
-            font-size: 22pt;
-        """)
-
         # Alignment status label
         self.alignStatusLabel = QtWidgets.QLabel("Not Aligned")
         self.alignStatusLabel.setAlignment(QtCore.Qt.AlignCenter)
@@ -256,8 +241,6 @@ class MainWindow(QtWidgets.QWidget):
         topLayout.addWidget(self.alignStatusLabel)
         topLayout.addSpacing(10)
         topLayout.addWidget(self.frameLabel)
-        topLayout.addStretch(1)
-        topLayout.addWidget(self.hintLabel)
         topLayout.addStretch(1)
 
         # AI教练建议面板
@@ -1041,9 +1024,6 @@ class MainWindow(QtWidgets.QWidget):
             # 4. 更新折线图
             self.scoreChart.add_scores(self.lastPercent, self.lastDtwPercent)
 
-            # Timing hint disabled
-            self.hintLabel.setText("")
-
             # 5. AI教练反馈（低分时主动提供建议）
             self._total_frames += 1
             if self.ai_feedback_enabled and self.ai_coach.config.is_configured():
@@ -1067,7 +1047,6 @@ class MainWindow(QtWidgets.QWidget):
                 self.lastDiffs = None
                 self.scoreLabel.setText("0 %")
                 self.dtwScoreLabel.setText("0 %")
-                self.hintLabel.setText("")
                 self._ema_score = None
                 self._ema_dtw_score = None
 
