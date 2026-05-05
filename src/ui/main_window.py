@@ -261,10 +261,10 @@ class MainWindow(QtWidgets.QWidget):
         self.aiCoachLabel.hide()  # 默认隐藏
 
         # AI设置按钮
-        self.btnAISettings = QtWidgets.QPushButton("🤖 AI Settings")
+        self.btnAISettings = QtWidgets.QPushButton("🤖 AI: ON")
         self.btnAISettings.setStyleSheet("""
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7C3AED, stop:1 #5B21B6);
-            border: 2px solid #7C3AED;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+            border: 2px solid #10B981;
             border-radius: 10px;
             color: white;
             font-weight: 600;
@@ -440,7 +440,8 @@ class MainWindow(QtWidgets.QWidget):
         self.btnPauseResume.clicked.connect(self.pause_resume)
         self.btnExtract.clicked.connect(self.extract_bad)
         self.btnClear.clicked.connect(self.clear_cache)
-        self.btnAISettings.clicked.connect(self.show_ai_settings)
+        self.btnAISettings.clicked.connect(self.toggle_ai_coach)
+        self._update_ai_button()  # 初始化按钮状态
         QtCore.QTimer.singleShot(0, self.enumerate_cams)
 
     def enumerate_cams(self):
@@ -629,37 +630,15 @@ class MainWindow(QtWidgets.QWidget):
             """)
             msg = f"Alignment complete!\n\nTime offset: {abs(time_offset):.2f}s\nFrame offset: {abs(frame_offset)} frames\n\n{'User video starts earlier' if time_offset < 0 else 'User video starts later'}"
         
-        # 显示美观的完成提示
-        msgBox = QtWidgets.QMessageBox(self)
-        msgBox.setWindowTitle("Audio Alignment Complete")
-        msgBox.setText("✓ Audio Alignment Successful")
-        msgBox.setInformativeText(msg)
-        msgBox.setIcon(QtWidgets.QMessageBox.Information)
-        msgBox.setStyleSheet("""
-            QMessageBox {
-                background-color: #1a1a2e;
-            }
-            QMessageBox QLabel {
-                color: #ffffff;
-                font-size: 14px;
-            }
-            QPushButton {
-                background-color: #10B981;
-                color: white;
-                border: none;
-                padding: 8px 24px;
-                border-radius: 4px;
-                font-size: 14px;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #059669;
-            }
-        """)
-        msgBox.exec()
+        # 不在这里显示完成提示框，而是在音频就位后显示
+        # 保存消息用于后续显示
+        self._alignment_msg = msg
         
         # Apply alignment to video readers
         self.apply_alignment()
+        
+        # 检查音频是否就位
+        self._check_audio_ready()
     
     @QtCore.pyqtSlot()
     def on_alignment_failed(self):
@@ -710,6 +689,57 @@ class MainWindow(QtWidgets.QWidget):
             }
         """)
         msgBox.exec()
+
+    def _check_audio_ready(self):
+        """检查音频是否就位，如果就位则弹出完成提示框"""
+        # 决定播放哪个视频的音频
+        audio_source = None
+        
+        if self.is_aligned:
+            if self.alignment_frame_offset > 0:
+                audio_source = self.ref_video_path
+            elif self.alignment_frame_offset < 0:
+                audio_source = self.user_video_path
+            else:
+                audio_source = self.ref_video_path
+        else:
+            audio_source = self.ref_video_path
+        
+        # 检查音频文件是否存在
+        if audio_source and os.path.exists(audio_source):
+            # 音频就位，弹出完成提示框
+            msg = getattr(self, '_alignment_msg', 'Alignment complete!')
+            
+            msgBox = QtWidgets.QMessageBox(self)
+            msgBox.setWindowTitle("Audio Alignment Complete")
+            msgBox.setText("✓ Audio Alignment Successful")
+            msgBox.setInformativeText(msg)
+            msgBox.setIcon(QtWidgets.QMessageBox.Information)
+            msgBox.setStyleSheet("""
+                QMessageBox {
+                    background-color: #1a1a2e;
+                }
+                QMessageBox QLabel {
+                    color: #ffffff;
+                    font-size: 14px;
+                }
+                QPushButton {
+                    background-color: #10B981;
+                    color: white;
+                    border: none;
+                    padding: 8px 24px;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    min-width: 80px;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+            """)
+            msgBox.exec()
+        else:
+            # 音频未就位，等待
+            print(f"[Audio] Audio source not ready: {audio_source}")
 
     def apply_alignment(self):
         if not self.is_aligned:
@@ -773,10 +803,61 @@ class MainWindow(QtWidgets.QWidget):
         if self.scoreChart.scores:
             avg_score = sum(self.scoreChart.scores) / len(self.scoreChart.scores)
 
-        # 生成AI课后总结（同步调用，确保在对话框中显示）
-        ai_summary = ""
+        # 显示等待AI评分的提示框
+        self._wait_dialog = None
         if self.ai_feedback_enabled and self.ai_coach.config.is_configured():
-            ai_summary = self.generate_session_summary_sync()
+            self._wait_dialog = QtWidgets.QProgressDialog(
+                "Waiting for AI scoring...",
+                None,
+                0, 0,
+                self
+            )
+            self._wait_dialog.setWindowTitle("AI Scoring")
+            self._wait_dialog.setWindowModality(QtCore.Qt.WindowModal)
+            self._wait_dialog.setMinimumDuration(0)
+            self._wait_dialog.setCancelButton(None)
+            self._wait_dialog.setStyleSheet("""
+                QProgressDialog {
+                    background-color: #1a1a2e;
+                }
+                QProgressDialog QLabel {
+                    color: #ffffff;
+                    font-size: 14px;
+                }
+            """)
+            self._wait_dialog.show()
+            QtWidgets.QApplication.processEvents()
+            
+            # 异步生成AI总结
+            self._generate_ai_summary_async(avg_score)
+        else:
+            # 没有AI评分，直接显示结果
+            self._show_final_result(avg_score, "")
+
+    def _generate_ai_summary_async(self, avg_score):
+        """异步生成AI总结"""
+        def do_generate():
+            ai_summary = ""
+            if self.ai_feedback_enabled and self.ai_coach.config.is_configured():
+                ai_summary = self.generate_session_summary_sync()
+            
+            # 在主线程中显示结果
+            QtCore.QMetaObject.invokeMethod(
+                self, "_show_final_result",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(float, avg_score),
+                QtCore.Q_ARG(str, ai_summary)
+            )
+        
+        threading.Thread(target=do_generate, daemon=True).start()
+
+    @QtCore.pyqtSlot(float, str)
+    def _show_final_result(self, avg_score, ai_summary):
+        """显示最终结果对话框"""
+        # 关闭等待对话框
+        if self._wait_dialog:
+            self._wait_dialog.close()
+            self._wait_dialog = None
         
         # Show Summary Dialog with AI feedback
         msg = QtWidgets.QMessageBox(self)
@@ -784,7 +865,7 @@ class MainWindow(QtWidgets.QWidget):
         msg.setText(f"<h3>Final Score: {int(avg_score)} pts</h3>")
         
         if ai_summary:
-            msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\n🤖 AI教练建议:\n{ai_summary}")
+            msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\n🤖 AI Coach Suggestions:\n{ai_summary}")
         else:
             msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\nGreat Job!")
         
@@ -889,7 +970,8 @@ class MainWindow(QtWidgets.QWidget):
 
     def play_reset(self):
         # This button now acts as Start / Stop
-        if self.playing or (self.countdown_timer.isActive()):
+        # 判断是否应该停止：正在播放 或 暂停中（按钮文字是Stop）
+        if self.playing or self.btnPlayReset.text() == "Stop" or self.countdown_timer.isActive():
             # User clicked "Stop"
             self.on_playback_finished() # Show score and stop
             self.btnPlayReset.setText("Start")
@@ -931,6 +1013,9 @@ class MainWindow(QtWidgets.QWidget):
             # 停止并重置音频
             self.stop_audio_playback()
             
+            # 预初始化音频播放器（在倒计时期间准备，减少延迟）
+            self._preinit_audio_player()
+            
             # Start countdown
             self._countdown_val = 3
             self.scoreLabel.setText(str(self._countdown_val))
@@ -971,7 +1056,7 @@ class MainWindow(QtWidgets.QWidget):
         # Resume threads
         if self.userReader: self.userReader.resume()
         if self.refReader: self.refReader.resume()
-        # 播放音频
+        # 播放音频（音频播放器已在倒计时期间预初始化）
         self.start_audio_playback()
 
     def pause(self):
@@ -1383,6 +1468,43 @@ class MainWindow(QtWidgets.QWidget):
         
         print("[Clear] All cache data cleared. System reset to initial state.")
 
+    def _preinit_audio_player(self):
+        """预初始化音频播放器，减少播放时的延迟"""
+        if not FFPYPLAYER_AVAILABLE:
+            return
+        
+        # 决定播放哪个视频的音频
+        audio_source = None
+        
+        if self.is_aligned:
+            if self.alignment_frame_offset > 0:
+                audio_source = self.ref_video_path
+            elif self.alignment_frame_offset < 0:
+                audio_source = self.user_video_path
+            else:
+                audio_source = self.ref_video_path
+        else:
+            audio_source = self.ref_video_path
+        
+        if not audio_source:
+            return
+        
+        print(f"[Audio] Pre-initializing audio player for: {audio_source}")
+        
+        # 在后台线程中预初始化播放器
+        def preinit():
+            try:
+                # 创建播放器并立即暂停
+                ff_opts = {}
+                self.audioPlayer = MediaPlayer(audio_source, ff_opts=ff_opts)
+                self.audioPlayer.set_pause(True)
+                self._audio_paused = True
+                print("[Audio] Audio player pre-initialized and paused")
+            except Exception as e:
+                print(f"[Audio] Pre-init error: {e}")
+        
+        threading.Thread(target=preinit, daemon=True).start()
+
     def start_audio_playback(self):
         """使用ffpyplayer开始播放音频
         
@@ -1394,6 +1516,15 @@ class MainWindow(QtWidgets.QWidget):
             print("[Audio] ffpyplayer not available")
             return
         
+        # 如果播放器已经预初始化，直接恢复播放
+        if self.audioPlayer and self._audio_paused:
+            print("[Audio] Resuming pre-initialized audio player")
+            self.audioPlayer.set_pause(False)
+            self._audio_paused = False
+            self.audio_playing = True
+            return
+        
+        # 如果没有预初始化，则创建新的播放器
         # 先停止之前的播放
         self.stop_audio_playback()
         
@@ -1622,117 +1753,40 @@ class MainWindow(QtWidgets.QWidget):
         if not self.aiCoachLabel.isVisible():
             self.aiCoachLabel.show()
 
-    def show_ai_settings(self):
-        """显示AI设置对话框"""
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("🤖 AI Coach Settings")
-        dialog.setMinimumSize(500, 400)
-        dialog.setStyleSheet("""
-            QDialog {
-                background-color: #1a1a2e;
-            }
-            QLabel {
-                color: #E0E0E0;
-                font-size: 14px;
-            }
-            QPushButton {
-                background-color: #7C3AED;
+    def toggle_ai_coach(self):
+        """切换AI教练功能的启用/禁用状态"""
+        self.ai_feedback_enabled = not self.ai_feedback_enabled
+        self.ai_coach.config.enabled = self.ai_feedback_enabled
+        self._update_ai_button()
+        
+        # 显示状态提示
+        status = "enabled" if self.ai_feedback_enabled else "disabled"
+        print(f"[AI Coach] AI Coach {status}")
+
+    def _update_ai_button(self):
+        """更新AI按钮的显示状态"""
+        if self.ai_feedback_enabled:
+            self.btnAISettings.setText("🤖 AI: ON")
+            self.btnAISettings.setStyleSheet("""
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669);
+                border: 2px solid #10B981;
+                border-radius: 10px;
                 color: white;
-                border: none;
-                padding: 12px 30px;
-                border-radius: 8px;
+                font-weight: 600;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #6D28D9;
-            }
-            QCheckBox {
-                color: #E0E0E0;
-                font-size: 16px;
-            }
-            QCheckBox::indicator {
-                width: 24px;
-                height: 24px;
-            }
-        """)
-
-        layout = QtWidgets.QVBoxLayout(dialog)
-        layout.setSpacing(20)
-
-        title = QtWidgets.QLabel("🤖 AI Dance Coach")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #A78BFA;")
-        layout.addWidget(title)
-
-        enable_check = QtWidgets.QCheckBox("启用 AI 教练")
-        enable_check.setChecked(self.ai_coach.config.enabled)
-        layout.addWidget(enable_check)
-
-        desc = QtWidgets.QLabel("""
-            AI教练会在训练过程中提供专业的舞蹈动作和节奏建议。
-            练习结束后会生成详细的课后总结和改进建议。
-        """)
-        desc.setWordWrap(True)
-        desc.setStyleSheet("""
-            background-color: #252545;
-            border: 1px solid #4a4a7a;
-            border-radius: 12px;
-            padding: 20px;
-            font-size: 14px;
-            color: #B0B0D0;
-            line-height: 1.6;
-        """)
-        layout.addWidget(desc)
-
-        status_label = QtWidgets.QLabel()
-        if self.ai_coach.config.enabled:
-            status_label.setText("✓ AI教练 当前已启用")
-            status_label.setStyleSheet("color: #10B981; font-size: 15px; font-weight: bold;")
+                padding: 10px 20px;
+            """)
         else:
-            status_label.setText("✗ AI教练 当前已禁用")
-            status_label.setStyleSheet("color: #EF4444; font-size: 15px; font-weight: bold;")
-        layout.addWidget(status_label)
-
-        info = QtWidgets.QLabel("""
-            💡 使用提示：
-            • 确保摄像头清晰可见
-            • 专注于标准动作的模仿
-            • 注意AI教练的实时建议
-            • 练习结束后会收到综合总结
-        """)
-        info.setWordWrap(True)
-        info.setStyleSheet("font-size: 13px; color: #888888; line-height: 1.8;")
-        layout.addWidget(info)
-
-        layout.addStretch()
-
-        btn_layout = QtWidgets.QHBoxLayout()
-
-        def on_enable_changed(state):
-            if state == 2:
-                status_label.setText("✓ AI教练 当前已启用")
-                status_label.setStyleSheet("color: #10B981; font-size: 15px; font-weight: bold;")
-            else:
-                status_label.setText("✗ AI教练 当前已禁用")
-                status_label.setStyleSheet("color: #EF4444; font-size: 15px; font-weight: bold;")
-
-        enable_check.stateChanged.connect(on_enable_changed)
-
-        save_btn = QtWidgets.QPushButton("保存设置")
-        close_btn = QtWidgets.QPushButton("关闭")
-
-        def save_settings():
-            self.ai_coach.config.enabled = enable_check.isChecked()
-            self.ai_feedback_enabled = enable_check.isChecked()
-            dialog.accept()
-
-        save_btn.clicked.connect(save_settings)
-        close_btn.clicked.connect(dialog.reject)
-
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(close_btn)
-        layout.addLayout(btn_layout)
-
-        dialog.exec()
+            self.btnAISettings.setText("🤖 AI: OFF")
+            self.btnAISettings.setStyleSheet("""
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #6B7280, stop:1 #4B5563);
+                border: 2px solid #6B7280;
+                border-radius: 10px;
+                color: white;
+                font-weight: 600;
+                font-size: 14px;
+                padding: 10px 20px;
+            """)
 
     def generate_session_summary_sync(self):
         """生成课后AI总结（同步版本，用于在对话框中显示）"""

@@ -53,63 +53,63 @@ class AICoach:
             return None
 
         angle_names = {
-            "leftShoulder": "左肩",
-            "rightShoulder": "右肩",
-            "leftElbow": "左肘",
-            "rightElbow": "右肘",
-            "leftHip": "左髋",
-            "rightHip": "右髋",
-            "leftKnee": "左膝",
-            "rightKnee": "右膝"
+            "leftShoulder": "Left Shoulder",
+            "rightShoulder": "Right Shoulder",
+            "leftElbow": "Left Elbow",
+            "rightElbow": "Right Elbow",
+            "leftHip": "Left Hip",
+            "rightHip": "Right Hip",
+            "leftKnee": "Left Knee",
+            "rightKnee": "Right Knee"
         }
 
         problem_angles = []
         for key, diff in diffs.items():
             if diff > 15:
                 name = angle_names.get(key, key)
-                direction = "弯曲不够" if diff > 30 else "角度偏差"
-                problem_angles.append(f"{name}{direction} {diff:.0f}度")
+                direction = "insufficient bend" if diff > 30 else "angle deviation"
+                problem_angles.append(f"{name} {direction} {diff:.0f}°")
 
         if score >= 85:
-            tone = "鼓励"
-            feedback = "动作很标准！"
+            tone = "encouraging"
+            feedback = "Great form!"
         elif score >= 70:
-            tone = "建议"
-            feedback = "整体不错，还有小改进空间"
+            tone = "suggestive"
+            feedback = "Good overall, minor improvements needed"
         else:
-            tone = "指导"
-            feedback = "需要多练习"
+            tone = "instructive"
+            feedback = "Needs more practice"
 
-        prompt = f"""你是一位专业舞蹈教练，请针对用户的肢体动作和节奏给出专业反馈（不超过50字）。
+        prompt = f"""You are a professional dance coach. Please provide professional feedback on the user's body movements and rhythm (no more than 50 words).
 
-分析数据：
-- 综合评分: {score:.0f}分
-- 需要改进的肢体部位: {", ".join(problem_angles) if problem_angles else "各部位动作标准"}
-- 节奏提示: {timing_hint if timing_hint else "节奏正常"}
+Analysis data:
+- Overall Score: {score:.0f} points
+- Body parts needing improvement: {", ".join(problem_angles) if problem_angles else "All parts in good form"}
+- Rhythm hint: {timing_hint if timing_hint else "Rhythm normal"}
 
-请重点关注：
-1. 肢体角度是否准确
-2. 动作幅度是否到位
-3. 节奏是否跟得上
+Please focus on:
+1. Whether body angles are accurate
+2. Whether movement amplitude is sufficient
+3. Whether rhythm is maintained
 
-用简洁专业的语言给出建议。"""
+Provide concise and professional suggestions in English."""
 
         return self._call_api(prompt)
 
     def analyze_bad_frame(self, time_str: str, score: float, diffs: Dict[str, float],
-                          ref_action: str = "标准动作") -> Optional[str]:
+                          ref_action: str = "Standard Action") -> Optional[str]:
         if not self.config.is_configured() or not self.client:
             return None
 
         angle_names = {
-            "leftShoulder": "左肩",
-            "rightShoulder": "右肩",
-            "leftElbow": "左肘",
-            "rightElbow": "右肘",
-            "leftHip": "左髋",
-            "rightHip": "右髋",
-            "leftKnee": "左膝",
-            "rightKnee": "右膝"
+            "leftShoulder": "Left Shoulder",
+            "rightShoulder": "Right Shoulder",
+            "leftElbow": "Left Elbow",
+            "rightElbow": "Right Elbow",
+            "leftHip": "Left Hip",
+            "rightHip": "Right Hip",
+            "leftKnee": "Left Knee",
+            "rightKnee": "Right Knee"
         }
 
         details = []
@@ -117,16 +117,16 @@ class AICoach:
             name = angle_names.get(key, key)
             if diff > 10:
                 if diff > 25:
-                    details.append(f"{name}需要调整 {diff:.0f}度")
+                    details.append(f"{name} needs adjustment {diff:.0f}°")
                 else:
-                    details.append(f"{name}偏差 {diff:.0f}度")
+                    details.append(f"{name} deviation {diff:.0f}°")
 
-        prompt = f"""在{time_str}，用户完成"{ref_action}"时，综合评分只有{score:.0f}分。
+        prompt = f"""At {time_str}, the user scored only {score:.0f} points while performing "{ref_action}".
 
-问题详情：
-{chr(10).join(details) if details else "整体姿态需要改进"}
+Problem details:
+{chr(10).join(details) if details else "Overall posture needs improvement"}
 
-请给出2个具体改进建议，帮助用户做得更好。回复要简洁、有针对性。"""
+Please provide 2 specific improvement suggestions to help the user do better. Keep the response concise and targeted in English."""
 
         return self._call_api(prompt)
 
@@ -139,21 +139,21 @@ class AICoach:
         bad_frames_count = session_data.get("bad_frames_count", 0)
         duration = session_data.get("duration", 0)
 
-        prompt = f"""作为专业舞蹈教练，请为用户生成详细的课后总结报告。
+        prompt = f"""As a professional dance coach, please generate a detailed post-session summary report for the user.
 
-练习数据：
-- 练习时长: {duration:.0f}秒
-- 总动作数: {total_frames}个
-- 平均得分: {avg_score:.1f}分
-- 需要改进的动作: {bad_frames_count}处
+Practice data:
+- Practice duration: {duration:.0f} seconds
+- Total movements: {total_frames}
+- Average score: {avg_score:.1f} points
+- Movements needing improvement: {bad_frames_count}
 
-请按照以下结构回复：
-1. 鼓励评语（1-2句）
-2. 肢体动作改进建议（针对角度、幅度）
-3. 节奏协调性建议
-4. 下一步练习重点
+Please structure your response as follows:
+1. Encouraging comments (1-2 sentences)
+2. Body movement improvement suggestions (focus on angles, amplitude)
+3. Rhythm and coordination suggestions
+4. Next practice focus areas
 
-保持专业但亲切的语气，回复控制在120字以内。"""
+Maintain a professional yet friendly tone. Keep the response within 120 words in English."""
 
         return self._call_api(prompt)
 
@@ -166,7 +166,7 @@ class AICoach:
                 response = self.client.chat.completions.create(
                     model=self.config.model,
                     messages=[
-                        {"role": "system", "content": "你是一位专业、温暖、鼓励人心的舞蹈教练。"},
+                        {"role": "system", "content": "You are a professional, warm, and encouraging dance coach. Always respond in English."},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=self.config.max_tokens,
