@@ -10,6 +10,7 @@ from src.core.pose_worker import PoseWorker
 from src.core.video_reader import VideoReader
 from src.ui.components import VideoPanel, ScoreChartWidget
 from src.core.audio_aligner import align_videos, LIBROSA_AVAILABLE, MOVIEPY_AVAILABLE
+from src.core.ai_coach import AICoach, AICoachConfig, CoachingHistory
 
 # 尝试导入音频播放库
 try:
@@ -144,6 +145,15 @@ class MainWindow(QtWidgets.QWidget):
         self.audio_playing = False
         self._audio_paused = False  # 音频是否处于暂停状态
 
+        # AI教练 - 默认启用
+        self.ai_coach = AICoach()
+        self.coaching_history = CoachingHistory()
+        self.ai_feedback_enabled = True
+        self.ai_feedback_countdown = 0
+        self.ai_feedback_interval = 90  # 每90帧（约3秒）请求一次AI反馈
+        self._session_start_time = None
+        self._total_frames = 0
+
         self.userPanel = VideoPanel()
         self.refPanel = VideoPanel()
         
@@ -250,6 +260,41 @@ class MainWindow(QtWidgets.QWidget):
         topLayout.addWidget(self.hintLabel)
         topLayout.addStretch(1)
 
+        # AI教练建议面板
+        self.aiCoachLabel = QtWidgets.QLabel("")
+        self.aiCoachLabel.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.aiCoachLabel.setWordWrap(True)
+        self.aiCoachLabel.setStyleSheet("""
+            color: #A78BFA;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2d1f4a, stop:1 #1a1040);
+            border: 2px solid #A78BFA;
+            border-radius: 18px;
+            padding: 12px 24px;
+            font-size: 14pt;
+            min-width: 300px;
+            max-width: 500px;
+        """)
+        self.aiCoachLabel.setMinimumHeight(80)
+        self.aiCoachLabel.hide()  # 默认隐藏
+
+        # AI设置按钮
+        self.btnAISettings = QtWidgets.QPushButton("🤖 AI Settings")
+        self.btnAISettings.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7C3AED, stop:1 #5B21B6);
+            border: 2px solid #7C3AED;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 10px 20px;
+        """)
+        self.btnAISettings.setMinimumHeight(44)
+
+        # AI布局
+        aiLayout = QtWidgets.QHBoxLayout()
+        aiLayout.addWidget(self.aiCoachLabel, 1)
+        aiLayout.addWidget(self.btnAISettings)
+
         self.stageLayout = QtWidgets.QHBoxLayout()
         self.stageLayout.setSpacing(20)
         self.stageLayout.addWidget(self.userPanel, 1)
@@ -348,7 +393,10 @@ class MainWindow(QtWidgets.QWidget):
         
         # 1. Top Bar (Score) - Fixed height ~100px
         layout.addLayout(topLayout)
-        
+
+        # 1.5. AI Coach Layout
+        layout.addLayout(aiLayout)
+
         # 2. Video Stage - 60% of space, try to keep 16:9
         # To enforce ratio, we might need to be careful.
         # But simple stretch factor is easiest.
@@ -409,6 +457,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btnPauseResume.clicked.connect(self.pause_resume)
         self.btnExtract.clicked.connect(self.extract_bad)
         self.btnClear.clicked.connect(self.clear_cache)
+        self.btnAISettings.clicked.connect(self.show_ai_settings)
         QtCore.QTimer.singleShot(0, self.enumerate_cams)
 
     def enumerate_cams(self):
@@ -740,13 +789,23 @@ class MainWindow(QtWidgets.QWidget):
         avg_score = 0
         if self.scoreChart.scores:
             avg_score = sum(self.scoreChart.scores) / len(self.scoreChart.scores)
-            
-        # Show Summary Dialog
+
+        # 生成AI课后总结（同步调用，确保在对话框中显示）
+        ai_summary = ""
+        if self.ai_feedback_enabled and self.ai_coach.config.is_configured():
+            ai_summary = self.generate_session_summary_sync()
+        
+        # Show Summary Dialog with AI feedback
         msg = QtWidgets.QMessageBox(self)
         msg.setWindowTitle("Session Ended")
         msg.setText(f"<h3>Final Score: {int(avg_score)} pts</h3>")
-        msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\nGreat Job!")
-        msg.setStyleSheet("QLabel{min-width: 300px; font-size: 16px;} QPushButton{ font-size: 14px; }")
+        
+        if ai_summary:
+            msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\n🤖 AI教练建议:\n{ai_summary}")
+        else:
+            msg.setInformativeText(f"Recorded {len(self.scoreChart.scores)} score points.\n\nGreat Job!")
+        
+        msg.setStyleSheet("QLabel{min-width: 400px; font-size: 14px;} QPushButton{ font-size: 14px; }")
         
         # Force OK button text
         msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
@@ -755,7 +814,7 @@ class MainWindow(QtWidgets.QWidget):
             ok_btn.setText("OK")
 
         msg.exec_()
-        
+
         # Reset UI state to "Ready to Start"
         self.btnPlayReset.setText("Start")
         self.btnPlayReset.setStyleSheet("""
@@ -863,6 +922,10 @@ class MainWindow(QtWidgets.QWidget):
         else:
             # User clicked "Start" -> Reset and Start
             self.scoreChart.reset()
+            self._session_start_time = time.time()
+            self._total_frames = 0
+            self.coaching_history.clear()
+            self.aiCoachLabel.hide()
             self.btnPlayReset.setText("Stop")
             self.btnPlayReset.setStyleSheet("""
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #EF4444, stop:1 #DC2626);
@@ -977,10 +1040,23 @@ class MainWindow(QtWidgets.QWidget):
             
             # 4. 更新折线图
             self.scoreChart.add_scores(self.lastPercent, self.lastDtwPercent)
-            
+
             # Timing hint disabled
             self.hintLabel.setText("")
-                
+
+            # 5. AI教练反馈（低分时主动提供建议）
+            self._total_frames += 1
+            if self.ai_feedback_enabled and self.ai_coach.config.is_configured():
+                current_score = self.lastDtwPercent if self.useCam else self.lastPercent
+
+                # 当分数低于70时，主动请求AI建议
+                if current_score < 70 and self._total_frames % 30 == 0:
+                    self.request_ai_feedback(diffs, current_score, timing_hint)
+
+                # 定时AI反馈（每3秒一次，不管分数如何）
+                if self._total_frames % self.ai_feedback_interval == 0:
+                    self.request_ai_feedback(diffs, current_score, timing_hint)
+
             self._miss_count = 0
         else:
             self._miss_count += 1
@@ -1541,3 +1617,255 @@ class MainWindow(QtWidgets.QWidget):
                 y = h - 50
         c.save()
         QtWidgets.QMessageBox.information(self, "Done", "PDF Report Exported")
+
+    def request_ai_feedback(self, diffs, score, timing_hint=""):
+        """异步请求AI教练反馈"""
+        def do_request():
+            try:
+                feedback = self.ai_coach.analyze_realtime_feedback(diffs, score, timing_hint)
+                if feedback:
+                    timestamp = time.strftime("%H:%M:%S")
+                    self.coaching_history.add_feedback(timestamp, feedback, score)
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_update_ai_feedback",
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, feedback)
+                    )
+            except Exception as e:
+                print(f"[AI Coach] Feedback request failed: {e}")
+
+        threading.Thread(target=do_request, daemon=True).start()
+
+    @QtCore.pyqtSlot(str)
+    def _update_ai_feedback(self, feedback):
+        """在UI线程中更新AI反馈显示"""
+        self.aiCoachLabel.setText(f"🤖 {feedback}")
+        if not self.aiCoachLabel.isVisible():
+            self.aiCoachLabel.show()
+
+    def show_ai_settings(self):
+        """显示AI设置对话框"""
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("🤖 AI Coach Settings")
+        dialog.setMinimumSize(500, 400)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a2e;
+            }
+            QLabel {
+                color: #E0E0E0;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #7C3AED;
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #6D28D9;
+            }
+            QCheckBox {
+                color: #E0E0E0;
+                font-size: 16px;
+            }
+            QCheckBox::indicator {
+                width: 24px;
+                height: 24px;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setSpacing(20)
+
+        title = QtWidgets.QLabel("🤖 AI Dance Coach")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #A78BFA;")
+        layout.addWidget(title)
+
+        enable_check = QtWidgets.QCheckBox("启用 AI 教练")
+        enable_check.setChecked(self.ai_coach.config.enabled)
+        layout.addWidget(enable_check)
+
+        desc = QtWidgets.QLabel("""
+            AI教练会在训练过程中提供专业的舞蹈动作和节奏建议。
+            练习结束后会生成详细的课后总结和改进建议。
+        """)
+        desc.setWordWrap(True)
+        desc.setStyleSheet("""
+            background-color: #252545;
+            border: 1px solid #4a4a7a;
+            border-radius: 12px;
+            padding: 20px;
+            font-size: 14px;
+            color: #B0B0D0;
+            line-height: 1.6;
+        """)
+        layout.addWidget(desc)
+
+        status_label = QtWidgets.QLabel()
+        if self.ai_coach.config.enabled:
+            status_label.setText("✓ AI教练 当前已启用")
+            status_label.setStyleSheet("color: #10B981; font-size: 15px; font-weight: bold;")
+        else:
+            status_label.setText("✗ AI教练 当前已禁用")
+            status_label.setStyleSheet("color: #EF4444; font-size: 15px; font-weight: bold;")
+        layout.addWidget(status_label)
+
+        info = QtWidgets.QLabel("""
+            💡 使用提示：
+            • 确保摄像头清晰可见
+            • 专注于标准动作的模仿
+            • 注意AI教练的实时建议
+            • 练习结束后会收到综合总结
+        """)
+        info.setWordWrap(True)
+        info.setStyleSheet("font-size: 13px; color: #888888; line-height: 1.8;")
+        layout.addWidget(info)
+
+        layout.addStretch()
+
+        btn_layout = QtWidgets.QHBoxLayout()
+
+        def on_enable_changed(state):
+            if state == 2:
+                status_label.setText("✓ AI教练 当前已启用")
+                status_label.setStyleSheet("color: #10B981; font-size: 15px; font-weight: bold;")
+            else:
+                status_label.setText("✗ AI教练 当前已禁用")
+                status_label.setStyleSheet("color: #EF4444; font-size: 15px; font-weight: bold;")
+
+        enable_check.stateChanged.connect(on_enable_changed)
+
+        save_btn = QtWidgets.QPushButton("保存设置")
+        close_btn = QtWidgets.QPushButton("关闭")
+
+        def save_settings():
+            self.ai_coach.config.enabled = enable_check.isChecked()
+            self.ai_feedback_enabled = enable_check.isChecked()
+            dialog.accept()
+
+        save_btn.clicked.connect(save_settings)
+        close_btn.clicked.connect(dialog.reject)
+
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
+
+    def generate_session_summary_sync(self):
+        """生成课后AI总结（同步版本，用于在对话框中显示）"""
+        if not self.ai_coach.config.is_configured():
+            return ""
+
+        duration = 0
+        if self._session_start_time:
+            duration = time.time() - self._session_start_time
+
+        session_data = {
+            "total_frames": len(self.scoreChart.scores) if hasattr(self.scoreChart, 'scores') else 0,
+            "avg_score": sum(self.scoreChart.scores) / len(self.scoreChart.scores) if self.scoreChart.scores else 0,
+            "bad_frames_count": len(self.badFrames),
+            "duration": duration
+        }
+
+        try:
+            summary = self.ai_coach.generate_session_summary(session_data)
+            if summary:
+                self.coaching_history.set_summary(summary)
+                return summary
+        except Exception as e:
+            print(f"[AI Coach] Summary generation failed: {e}")
+        
+        return ""
+
+    def generate_session_summary(self):
+        """生成课后AI总结（异步版本）"""
+        if not self.ai_coach.config.is_configured():
+            return
+
+        duration = 0
+        if self._session_start_time:
+            duration = time.time() - self._session_start_time
+
+        session_data = {
+            "total_frames": len(self.scoreChart.scores) if hasattr(self.scoreChart, 'scores') else 0,
+            "avg_score": sum(self.scoreChart.scores) / len(self.scoreChart.scores) if self.scoreChart.scores else 0,
+            "bad_frames_count": len(self.badFrames),
+            "duration": duration
+        }
+
+        def do_generate():
+            try:
+                summary = self.ai_coach.generate_session_summary(session_data)
+                if summary:
+                    self.coaching_history.set_summary(summary)
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_show_session_summary",
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, summary)
+                    )
+            except Exception as e:
+                print(f"[AI Coach] Summary generation failed: {e}")
+
+        threading.Thread(target=do_generate, daemon=True).start()
+
+    @QtCore.pyqtSlot(str)
+    def _show_session_summary(self, summary):
+        """显示课后总结对话框"""
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("🤖 AI Coach - Session Summary")
+        dialog.setMinimumSize(600, 400)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a2e;
+            }
+            QLabel {
+                color: #E0E0E0;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #7C3AED;
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                border-radius: 8px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #6D28D9;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setSpacing(20)
+
+        title = QtWidgets.QLabel("📊 Practice Session Summary")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #A78BFA;")
+        layout.addWidget(title)
+
+        summary_label = QtWidgets.QLabel(summary)
+        summary_label.setWordWrap(True)
+        summary_label.setStyleSheet("""
+            background-color: #252545;
+            border: 1px solid #4a4a7a;
+            border-radius: 12px;
+            padding: 20px;
+            font-size: 15px;
+            color: #E0E0E0;
+            line-height: 1.6;
+        """)
+        layout.addWidget(summary_label)
+
+        layout.addStretch()
+
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
