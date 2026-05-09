@@ -219,17 +219,13 @@ Test coverage includes:
 | Scoring Accuracy | ± 3% error margin |
 | Supported Input | Webcam, MP4, AVI, MOV |
 
-## 📄 License
 
-This project is licensed under the MIT License.
 
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
 
-## 📞 Contact
 
-For questions or support, please contact the project maintainer at awdawer@example.com.
 
 ---
 
