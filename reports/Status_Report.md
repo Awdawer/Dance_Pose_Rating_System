@@ -1,4 +1,3 @@
-# Status Report
 
 **Project Title:** Dance Pose Scoring and Training Assistant System  
 **Team Name:** [Your Team Name]  
@@ -21,23 +20,23 @@ This project aims to democratize professional dance training by leveraging artif
 
 ### Objectives
 1.  **Real-Time Performance**: Achieve a processing speed of at least 30 FPS on standard consumer hardware.
-2.  **Scoring Accuracy**: Develop a scoring model that differentiates between correct and incorrect postures with high precision, specifically targeting limb joint angles.
+2.  **Scoring Accuracy**: Develop a scoring model that differentiates between correct and incorrect postures with high precision, specifically targeting limb angles and overall body shape.
 3.  **User Experience**: Create an intuitive interface that offers immediate visual and numerical feedback without distracting the user.
 
 ### Scope
-The project scope encompasses the development of a Python-based desktop application. Key features include video file and camera input handling, pose estimation, synchronous playback, a joint angle-based scoring engine, and a post-session performance report generator. Advanced features like AR ghost overlays and audio-based beat detection are considered stretch goals for the final phase.
+The project scope encompasses the development of a Python-based desktop application. Key features include video file and camera input handling, pose estimation, synchronous playback, a dual-criteria scoring engine, and a post-session performance report generator. Advanced features like AR ghost overlays and audio-based beat detection are considered stretch goals for the final phase.
 
 ### Approach
 The development follows an iterative, agile methodology.
 *   **Phase I**: Core infrastructure setup (MediaPipe integration, basic UI).
-*   **Phase II**: Algorithm refinement (Joint Angle Scoring Model).
+*   **Phase II**: Algorithm refinement (Dual-Weighted Scoring Model).
 *   **Phase III**: UI/UX enhancement (Dark mode, real-time charts) and performance optimization (Multi-threading).
 *   **Phase IV**: Intelligence expansion (DTW, LLM integration).
 
 ### Major Milestones & Deliverables
 *   **Milestone 1 (Completed)**: Functional prototype with basic pose detection and Euclidean distance scoring.
     *   *Deliverable*: Initial application entry point and repository setup.
-*   **Milestone 2 (Completed)**: Implementation of the Joint Angle Scoring Model and multi-threaded video reader.
+*   **Milestone 2 (Completed)**: Implementation of the Dual-Weighted Scoring Model and multi-threaded video reader.
     *   *Deliverable*: Core scoring module and video processing module.
 *   **Milestone 3 (Completed)**: UI overhaul and feature completion (Synchronized playback, Session Summary).
     *   *Deliverable*: Main GUI window module and Progress Report document.
@@ -53,7 +52,7 @@ We have pivoted the primary deployment target from a web-based application to a 
 **Feedback from Proposal:** "Simple Euclidean distance may not capture the nuances of dance movements, such as joint angles."
 
 **Response:**
-We implemented a **Joint Angle Scoring Model** that focuses specifically on eight core joints (shoulders, elbows, hips, knees). The algorithm calculates the angle difference between user and reference poses for each joint, applying weighted averaging with higher weights for limb joints (knees and elbows: 1.2x weight) to capture movement nuances effectively.
+We implemented a **Dual-Weighted Scoring Model** (Section 2.2.1 of the Progress Report). This model combines Weighted Procrustes Distance (for global shape) with Cosine Similarity (for local joint angles). We assigned higher weights (1.5x - 2.0x) to limb extremities (wrists, ankles) to specifically address the feedback regarding movement nuances.
 
 ## Variations or Deviations from Original Proposal
 
@@ -78,7 +77,7 @@ The project is currently **on schedule** according to the revised timeline.
 
 **Work Completed:**
 *   **Core Engine**: The pose processing and video reading modules are fully functional and optimized for multi-threading.
-*   **Scoring Algorithm**: The joint angle-based scoring algorithm is implemented and tuned.
+*   **Scoring Algorithm**: The dual-weighted algorithm is implemented and tuned.
 *   **User Interface**: The "UI/UX 2.0" update is complete, featuring a dark theme, real-time neon charts, and adaptive video layouts.
 *   **Reporting**: The session summary and PDF export features are operational.
 
