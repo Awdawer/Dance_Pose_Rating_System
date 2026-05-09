@@ -798,6 +798,9 @@ class MainWindow(QtWidgets.QWidget):
         # 停止音频（完全销毁，不是暂停）
         self.stop_audio_playback()
         
+        # 预创建视频读取器，避免下次播放时延迟
+        self._precreate_video_readers()
+        
         # Calculate final score
         avg_score = 0
         if self.scoreChart.scores:
@@ -833,6 +836,49 @@ class MainWindow(QtWidgets.QWidget):
         else:
             # 没有AI评分，直接显示结果
             self._show_final_result(avg_score, "")
+    
+    def _precreate_video_readers(self):
+        """预创建视频读取器，避免下次播放时延迟"""
+        def do_precreate():
+            try:
+                print("[Precreate] Starting video reader precreation...")
+                
+                # 预创建用户视频读取器
+                if self.user_video_path and self.userReader:
+                    user_start = self.userReader._start_frame if hasattr(self.userReader, '_start_frame') else 0
+                    print(f"[Precreate] Creating user video reader with start_frame={user_start}")
+                    new_user_reader = VideoReader(self.user_video_path, start_frame=user_start)
+                    new_user_reader.start()
+                    new_user_reader.pause()
+                    
+                    # 替换旧的读取器
+                    old_reader = self.userReader
+                    self.userReader = new_user_reader
+                    old_reader.stop()
+                    print("[Precreate] User video reader precreated")
+                
+                # 预创建参考视频读取器
+                if self.ref_video_path and self.refReader:
+                    ref_start = self.refReader._start_frame if hasattr(self.refReader, '_start_frame') else 0
+                    print(f"[Precreate] Creating ref video reader with start_frame={ref_start}")
+                    new_ref_reader = VideoReader(self.ref_video_path, start_frame=ref_start)
+                    new_ref_reader.finished.connect(self.on_playback_finished)
+                    new_ref_reader.start()
+                    new_ref_reader.pause()
+                    
+                    # 替换旧的读取器
+                    old_reader = self.refReader
+                    self.refReader = new_ref_reader
+                    old_reader.stop()
+                    print("[Precreate] Reference video reader precreated")
+                
+                print("[Precreate] Video reader precreation completed")
+                
+            except Exception as e:
+                print(f"[Precreate] Error: {e}")
+        
+        # 在后台线程中预创建，避免阻塞UI
+        threading.Thread(target=do_precreate, daemon=True).start()
 
     def _generate_ai_summary_async(self, avg_score):
         """异步生成AI总结"""
@@ -1002,11 +1048,49 @@ class MainWindow(QtWidgets.QWidget):
                 padding: 12px 30px;
             """) # Red
             
-            # Reset readers
-            if self.userReader: 
+            # Reset readers - use precreated readers if available
+            if self.userReader:
+                if not self.userReader.isRunning():
+                    # 等待预创建完成（最多等待2秒）
+                    wait_time = 0
+                    while not self.userReader.isRunning() and wait_time < 2.0:
+                        time.sleep(0.1)
+                        wait_time += 0.1
+                    
+                    if not self.userReader.isRunning():
+                        # 预创建失败，手动创建
+                        print("[Playback] User video precreate failed, creating manually...")
+                        user_start = self.userReader._start_frame if hasattr(self.userReader, '_start_frame') else 0
+                        self.userReader.stop()
+                        self.userReader = VideoReader(self.user_video_path, start_frame=user_start)
+                        self.userReader.start()
+                        self.userReader.pause()
+                    else:
+                        print("[Playback] Using precreated user video reader")
+                
                 self.userReader.pause()
                 self.userReader.reset()
-            if self.refReader: 
+            
+            if self.refReader:
+                if not self.refReader.isRunning():
+                    # 等待预创建完成（最多等待2秒）
+                    wait_time = 0
+                    while not self.refReader.isRunning() and wait_time < 2.0:
+                        time.sleep(0.1)
+                        wait_time += 0.1
+                    
+                    if not self.refReader.isRunning():
+                        # 预创建失败，手动创建
+                        print("[Playback] Reference video precreate failed, creating manually...")
+                        ref_start = self.refReader._start_frame if hasattr(self.refReader, '_start_frame') else 0
+                        self.refReader.stop()
+                        self.refReader = VideoReader(self.ref_video_path, start_frame=ref_start)
+                        self.refReader.finished.connect(self.on_playback_finished)
+                        self.refReader.start()
+                        self.refReader.pause()
+                    else:
+                        print("[Playback] Using precreated reference video reader")
+                
                 self.refReader.pause()
                 self.refReader.reset()
             
@@ -1494,8 +1578,12 @@ class MainWindow(QtWidgets.QWidget):
         # 在后台线程中预初始化播放器
         def preinit():
             try:
-                # 创建播放器并立即暂停
-                ff_opts = {}
+                ff_opts = {
+                    'sync': 'audio',
+                    'autoexit': True,
+                    'framedrop': False,
+                    'fast': True,
+                }
                 self.audioPlayer = MediaPlayer(audio_source, ff_opts=ff_opts)
                 self.audioPlayer.set_pause(True)
                 self._audio_paused = True
@@ -1522,6 +1610,65 @@ class MainWindow(QtWidgets.QWidget):
             self.audioPlayer.set_pause(False)
             self._audio_paused = False
             self.audio_playing = True
+            
+            # 启动监控线程
+            def monitor_audio():
+                last_pts = -1.0
+                repeat_count = 0
+                max_repeats = 3
+                frame_count = 0
+                last_log_time = time.time()
+                
+                while self.audio_playing:
+                    try:
+                        frame, val = self.audioPlayer.get_frame()
+                        
+                        if val == 'eof':
+                            print("[Audio] Reached end of file")
+                            break
+                        
+                        if val == 'paused':
+                            time.sleep(0.01)
+                            continue
+                        
+                        if frame is None:
+                            time.sleep(0.01)
+                            continue
+                        
+                        frame_count += 1
+                        
+                        if isinstance(frame, tuple) and len(frame) >= 1:
+                            pts = frame[0]
+                            
+                            if pts is not None and isinstance(pts, (int, float)):
+                                if pts == last_pts:
+                                    repeat_count += 1
+                                    if repeat_count > max_repeats:
+                                        print(f"[Audio] Warning: Repeated frame detected, pts={pts:.2f}, count={repeat_count}")
+                                        time.sleep(0.005)
+                                        continue
+                                else:
+                                    if last_pts > pts and last_pts > 0:
+                                        print(f"[Audio] Warning: Frame went backwards! {last_pts:.2f} -> {pts:.2f}")
+                                    last_pts = pts
+                                    repeat_count = 0
+                        
+                        current_time = time.time()
+                        if current_time - last_log_time >= 5.0:
+                            print(f"[Audio] Performance: {frame_count} frames processed, current pts={last_pts:.2f}")
+                            last_log_time = current_time
+                        
+                        time.sleep(0.005)
+                        
+                    except Exception as frame_error:
+                        print(f"[Audio] Frame processing error: {frame_error}")
+                        time.sleep(0.01)
+                        continue
+                
+                print(f"[Audio] Monitor finished, total frames: {frame_count}")
+            
+            self.audio_thread = threading.Thread(target=monitor_audio, daemon=True)
+            self.audio_thread.start()
             return
         
         # 如果没有预初始化，则创建新的播放器
@@ -1557,25 +1704,76 @@ class MainWindow(QtWidgets.QWidget):
         
         def play_audio():
             try:
-                # 创建播放器，从头开始播放
-                ff_opts = {}
+                ff_opts = {
+                    'sync': 'audio',
+                    'autoexit': True,
+                    'framedrop': False,
+                    'fast': True,
+                }
                 self.audioPlayer = MediaPlayer(audio_source, ff_opts=ff_opts)
                 self.audio_playing = True
                 self._audio_paused = False
                 print(f"[Audio] Started playback")
                 
+                last_pts = -1.0
+                repeat_count = 0
+                max_repeats = 3
+                frame_count = 0
+                last_log_time = time.time()
+                
                 while self.audio_playing:
-                    frame, val = self.audioPlayer.get_frame()
-                    if val == 'eof':
-                        break
-                    if frame is None:
+                    try:
+                        frame, val = self.audioPlayer.get_frame()
+                        
+                        if val == 'eof':
+                            print("[Audio] Reached end of file")
+                            break
+                        
+                        if val == 'paused':
+                            time.sleep(0.01)
+                            continue
+                        
+                        if frame is None:
+                            time.sleep(0.01)
+                            continue
+                        
+                        frame_count += 1
+                        
+                        if isinstance(frame, tuple) and len(frame) >= 1:
+                            pts = frame[0]
+                            
+                            if pts is not None and isinstance(pts, (int, float)):
+                                if pts == last_pts:
+                                    repeat_count += 1
+                                    if repeat_count > max_repeats:
+                                        print(f"[Audio] Warning: Repeated frame detected, pts={pts:.2f}, count={repeat_count}")
+                                        time.sleep(0.005)
+                                        continue
+                                else:
+                                    if last_pts > pts and last_pts > 0:
+                                        print(f"[Audio] Warning: Frame went backwards! {last_pts:.2f} -> {pts:.2f}")
+                                    last_pts = pts
+                                    repeat_count = 0
+                        
+                        current_time = time.time()
+                        if current_time - last_log_time >= 5.0:
+                            print(f"[Audio] Performance: {frame_count} frames processed, current pts={last_pts:.2f}")
+                            last_log_time = current_time
+                        
+                        time.sleep(0.005)
+                        
+                    except Exception as frame_error:
+                        print(f"[Audio] Frame processing error: {frame_error}")
                         time.sleep(0.01)
                         continue
                 
                 if self.audioPlayer:
-                    self.audioPlayer.close_player()
+                    try:
+                        self.audioPlayer.close_player()
+                    except:
+                        pass
                     self.audioPlayer = None
-                print("[Audio] Playback finished")
+                print(f"[Audio] Playback finished, total frames: {frame_count}")
             except Exception as e:
                 import traceback
                 print(f"[Audio] Playback error: {e}")
