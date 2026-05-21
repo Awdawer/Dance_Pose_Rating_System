@@ -84,7 +84,15 @@ class PoseWorker(QtCore.QObject):
 
     def detect_landmarks(self, frame_bgr, roi, max_long_side=360):
         import mediapipe as mp
+        
+        # 检查帧是否为空
+        if frame_bgr is None or frame_bgr.size == 0:
+            return [], roi
+        
         h, w = frame_bgr.shape[:2]
+        if h == 0 or w == 0:
+            return [], roi
+        
         if roi is None:
             x0, y0, cw, ch = 0, 0, w, h
         else:

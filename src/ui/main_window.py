@@ -957,9 +957,10 @@ class MainWindow(QtWidgets.QWidget):
             """) # Red
 
     def start_cam(self):
+        # 先清除所有缓存
+        self.clear_cache()
+        
         self.useCam = True
-        if self.userReader:
-            self.userReader.stop()
         idx = self.camCombo.currentData()
         if idx is None:
             idx = 0
@@ -986,6 +987,7 @@ class MainWindow(QtWidgets.QWidget):
         self.dtwScoreLabel.show()
         
         # 注意：不要设置 self.playing = True，等待用户点击开始按钮
+        # 但摄像头画面会立即显示（通过 on_tick 处理）
         self.playing = False
         self.update_timer_interval()
         
@@ -1155,7 +1157,10 @@ class MainWindow(QtWidgets.QWidget):
     # Removed step()
 
     def on_tick(self):
-        if self.playing:
+        # 摄像头模式下，即使未开始播放也显示摄像头画面
+        if self.useCam and not self.playing:
+            self.read_and_process(step=False)
+        elif self.playing:
             self.read_and_process(step=False)
 
     def on_results_ready(self, u_lms, r_lms, diffs, real_time_percent, dtw_percent, timing_hint):
@@ -1259,9 +1264,14 @@ class MainWindow(QtWidgets.QWidget):
         # If we have a new ref frame, we should detect.
         # But to save CPU, we might still stride.
         
-        # Actually, since reader is threaded, we can just check if user_frame is not None
-        need_detect_user = (user_frame is not None) and (self._tick_count % (self.detect_stride_user if self.useCam else self.detect_stride) == 0 or not self.lastUserLandmarks)
-        need_detect_ref = (ref_frame is not None) and (self._tick_count % self.detect_stride_ref == 0 or not self.lastRefLandmarks)
+        # 摄像头模式下，未开始播放时只显示画面，不进行检测
+        if self.useCam and not self.playing:
+            need_detect_user = False
+            need_detect_ref = False
+        else:
+            # Actually, since reader is threaded, we can just check if user_frame is not None
+            need_detect_user = (user_frame is not None) and (self._tick_count % (self.detect_stride_user if self.useCam else self.detect_stride) == 0 or not self.lastUserLandmarks)
+            need_detect_ref = (ref_frame is not None) and (self._tick_count % self.detect_stride_ref == 0 or not self.lastRefLandmarks)
         
         if need_detect_user or need_detect_ref:
             payload = (
@@ -1480,13 +1490,13 @@ class MainWindow(QtWidgets.QWidget):
         # 1. 暂停播放
         self.pause()
         
-        # 2. 重置视频读取器
+        # 2. 停止并清除视频读取器
         if self.userReader:
-            self.userReader.pause()
-            self.userReader.reset()
+            self.userReader.stop()
+            self.userReader = None
         if self.refReader:
-            self.refReader.pause()
-            self.refReader.reset()
+            self.refReader.stop()
+            self.refReader = None
         
         # 3. 停止并清除音频
         self.stop_audio_playback()
